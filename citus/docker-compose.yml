@@ -1,87 +1,252 @@
-# Docker Compose para Cluster Citus - Apple Silicon Ready
-# TCC: Bancos de Dados Distribuídos
+# Docker Compose para Cluster Citus com HA Simplificado
+# TCC: Bancos de Dados Distribuídos - Versão Educacional
 
+networks:
+  citus_cluster:
+    name: citus_cluster_ha
+    driver: bridge
+
+volumes:
+  citus_coordinator_data:
+  citus_coordinator_standby_data:
+  citus_worker1a_data:
+  citus_worker1b_data:
+  citus_worker2a_data:
+  citus_worker2b_data:
+  citus_grafana_data:
 services:
-  # ──────────────── Citus Master (Coordinator) ────────────────
-  master:
-    container_name: "${COMPOSE_PROJECT_NAME:-citus}_master"
+  # ═══════════════════════════════════════════════════════════════
+  # 🎯 COORDINATOR PRIMARY - Nó coordenador principal
+  # ═══════════════════════════════════════════════════════════════
+  coordinator-primary:
     image: "citusdata/citus:12.1"
+    container_name: "citus_coordinator_primary"
+    hostname: coordinator-primary
     platform: linux/amd64
-    ports: ["${COORDINATOR_EXTERNAL_PORT:-5432}:5432"]
-    labels: ["com.citusdata.role=Master"]
-    environment: &AUTH
-      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
-      PGUSER: "${POSTGRES_USER:-postgres}"
-      PGPASSWORD: "${POSTGRES_PASSWORD:-postgres}"
-      POSTGRES_HOST_AUTH_METHOD: "${POSTGRES_HOST_AUTH_METHOD:-trust}"
+    networks:
+      - citus_cluster
+    ports: 
+      - "5432:5432"
+    volumes:
+      - citus_coordinator_data:/var/lib/postgresql/data
+    environment: &auth
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: citus_platform
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    labels:
+      - "com.citusdata.role=Coordinator"
+      - "com.citusdata.cluster=citus_ha"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d citus_platform"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ──────────────── Citus Worker 1 ────────────────  
-  worker1:
-    container_name: "${COMPOSE_PROJECT_NAME:-citus}_worker1"
+  # ═══════════════════════════════════════════════════════════════
+  # 🔄 COORDINATOR STANDBY - Backup do coordenador
+  # ═══════════════════════════════════════════════════════════════
+  coordinator-standby:
     image: "citusdata/citus:12.1"
+    container_name: "citus_coordinator_standby"
+    hostname: coordinator-standby
     platform: linux/amd64
-    labels: ["com.citusdata.role=Worker"]
-    depends_on: 
-      master:
+    networks:
+      - citus_cluster
+    ports: 
+      - "5434:5432"
+    volumes:
+      - citus_coordinator_standby_data:/var/lib/postgresql/data
+    environment: 
+      <<: *auth
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    labels:
+      - "com.citusdata.role=Coordinator-Standby"
+      - "com.citusdata.cluster=citus_ha"
+    depends_on:
+      coordinator-primary:
         condition: service_healthy
-    environment: *AUTH
-    expose:
-      - "5432"
 
-  # ──────────────── Citus Worker 2 ────────────────
-  worker2:
-    container_name: "${COMPOSE_PROJECT_NAME:-citus}_worker2"
+  # ═══════════════════════════════════════════════════════════════
+  # 🔧 WORKER GROUP 1 PRIMARY - Nó de dados principal grupo 1
+  # ═══════════════════════════════════════════════════════════════
+  worker1-primary:
     image: "citusdata/citus:12.1"
+    container_name: "citus_worker_1a"
+    hostname: worker1
     platform: linux/amd64
-    labels: ["com.citusdata.role=Worker"]
-    depends_on: 
-      master:
+    networks:
+      - citus_cluster
+    ports:
+      - "5435:5432"
+    volumes:
+      - citus_worker1a_data:/var/lib/postgresql/data
+    environment: *auth
+    labels:
+      - "com.citusdata.role=Worker-Primary"
+      - "com.citusdata.cluster=citus_ha"
+      - "com.citusdata.group=1"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d citus_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      coordinator-primary:
         condition: service_healthy
-    environment: *AUTH
-    expose:
-      - "5432"
 
-  # ──────────────── Metrics Exporter ────────────────
+  # ═══════════════════════════════════════════════════════════════
+  # 🔄 WORKER GROUP 1 STANDBY - Backup do worker grupo 1
+  # ═══════════════════════════════════════════════════════════════
+  worker1-standby:
+    image: "citusdata/citus:12.1"
+    container_name: "citus_worker_1b"
+    hostname: worker1-standby
+    platform: linux/amd64
+    networks:
+      - citus_cluster
+    ports:
+      - "5436:5432"
+    volumes:
+      - citus_worker1b_data:/var/lib/postgresql/data
+    environment: 
+      <<: *auth
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    labels:
+      - "com.citusdata.role=Worker-Standby"
+      - "com.citusdata.cluster=citus_ha"
+      - "com.citusdata.group=1"
+    depends_on:
+      worker1-primary:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🔧 WORKER GROUP 2 PRIMARY - Nó de dados principal grupo 2  
+  # ═══════════════════════════════════════════════════════════════
+  worker2-primary:
+    image: "citusdata/citus:12.1"
+    container_name: "citus_worker_2a"
+    hostname: worker2
+    platform: linux/amd64
+    networks:
+      - citus_cluster
+    ports:
+      - "5437:5432"
+    volumes:
+      - citus_worker2a_data:/var/lib/postgresql/data
+    environment: *auth
+    labels:
+      - "com.citusdata.role=Worker-Primary"
+      - "com.citusdata.cluster=citus_ha"
+      - "com.citusdata.group=2"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d citus_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      coordinator-primary:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🔄 WORKER GROUP 2 STANDBY - Backup do worker grupo 2
+  # ═══════════════════════════════════════════════════════════════
+  worker2-standby:
+    image: "citusdata/citus:12.1"
+    container_name: "citus_worker_2b"
+    hostname: worker2-standby
+    platform: linux/amd64
+    networks:
+      - citus_cluster
+    ports:
+      - "5438:5432"
+    volumes:
+      - citus_worker2b_data:/var/lib/postgresql/data
+      - ./scripts/setup_replica_worker2b.sh:/docker-entrypoint-initdb.d/setup_replica.sh:ro
+    environment: 
+      <<: *auth
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+      PGUSER_REPLICA: "replicator"
+      PGPASSWORD_REPLICA: "replicator_pass"
+      PRIMARY_HOST: "worker2"
+    labels:
+      - "com.citusdata.role=Worker-Standby"
+      - "com.citusdata.cluster=citus_ha"
+      - "com.citusdata.group=2"
+    depends_on:
+      worker2-primary:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════════════════════════
+  # 🔄 HAPROXY - Load Balancer para failover automático dos workers
+  # ═══════════════════════════════════════════════════════════════
+  haproxy-worker1:
+    image: haproxy:2.8
+    container_name: "citus_haproxy_worker1"
+    hostname: worker1-lb
+    platform: linux/amd64
+    networks:
+      - citus_cluster
+    ports:
+      - "5440:5432"  # Porta externa para worker1 group
+    volumes:
+      - ./haproxy-worker1.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - worker1-primary
+      - worker1-standby
+    labels:
+      - "com.citusdata.role=LoadBalancer"
+      - "com.citusdata.group=1"
+
+  haproxy-worker2:
+    image: haproxy:2.8
+    container_name: "citus_haproxy_worker2"
+    hostname: worker2-lb
+    platform: linux/amd64
+    networks:
+      - citus_cluster
+    ports:
+      - "5441:5432"  # Porta externa para worker2 group
+    volumes:
+      - ./haproxy-worker2.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - worker2-primary
+      - worker2-standby
+    labels:
+      - "com.citusdata.role=LoadBalancer"
+      - "com.citusdata.group=2"
+
+  # 🚀 CLUSTER SETUP removido - configuração manual via scripts/simple_setup.sh
+
+  # ═══════════════════════════════════════════════════════════════
+  # 📊 MONITORING - Prometheus para métricas
+  # ═══════════════════════════════════════════════════════════════
   postgres-exporter:
     image: "prometheuscommunity/postgres-exporter:latest"
-    container_name: postgres_exporter
+    container_name: "citus_postgres_exporter"
     platform: linux/amd64
+    networks:
+      - citus_cluster
     ports:
       - "9187:9187"
-    depends_on:
-      master:
-        condition: service_healthy
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@master:5432/postgres?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres@coordinator-primary:5432/citus_platform?sslmode=disable"
+    depends_on:
+      coordinator-primary:
+        condition: service_healthy
 
-   # ──────────────── Node Exporter ────────────────
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: node_exporter
-    platform: linux/amd64
-    ports:
-      - "9100:9100"
-    restart: unless-stopped
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.ignored-mount-points="^/(sys|proc|dev)($|/)"'
-
-  # ──────────────── Prometheus ────────────────
+  # ═══════════════════════════════════════════════════════════════
+  # 📈 OBSERVABILITY - Prometheus + Grafana
+  # ═══════════════════════════════════════════════════════════════
   prometheus:
     image: prom/prometheus:latest
-    container_name: prometheus
+    container_name: "citus_prometheus"
+    hostname: prometheus
     platform: linux/amd64
+    networks:
+      - citus_cluster
     ports:
       - "9090:9090"
     volumes:
@@ -89,24 +254,42 @@ services:
     depends_on:
       - postgres-exporter
 
-  # ──────────────── Grafana ────────────────
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana
+    container_name: "citus_grafana"
+    hostname: grafana  
     platform: linux/amd64
+    networks:
+      - citus_cluster
     ports:
       - "3000:3000"
-    depends_on:
-      - prometheus
     volumes:
-      - grafana-storage:/var/lib/grafana
+      - citus_grafana_data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_DEFAULT_THEME=dark
+    depends_on:
+      - prometheus
 
-volumes:
-  grafana-storage:
-
-# Comandos úteis:
-# docker exec -it ${COMPOSE_PROJECT_NAME:-citus}_master psql -U postgres
-# docker exec -it ${COMPOSE_PROJECT_NAME:-citus}_worker1 psql -U postgres  
-# docker exec -it ${COMPOSE_PROJECT_NAME:-citus}_worker2 psql -U postgres
+# ═══════════════════════════════════════════════════════════════════════════════
+# 📝 COMANDOS ÚTEIS:
+# ═══════════════════════════════════════════════════════════════════════════════
+# 
+# 🚀 Iniciar cluster:
+#   docker compose up -d
+#
+# 🔍 Ver status:
+#   docker compose ps
+#
+# 🎯 Conectar ao coordinator:
+#   docker exec -it citus_coordinator_primary psql -U postgres -d citus_platform
+#
+# 🔧 Conectar ao worker:
+#   docker exec -it citus_worker_1a psql -U postgres -d citus_platform
+#
+# 📊 Ver workers ativos:
+#   docker exec -it citus_coordinator_primary psql -U postgres -d citus_platform -c "SELECT * FROM citus_get_active_worker_nodes();"
+#
+# 🧹 Limpar tudo:
+#   docker compose down -v
+# ═══════════════════════════════════════════════════════════════════════════════
