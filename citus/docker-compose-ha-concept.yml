@@ -1,0 +1,277 @@
+# docker-compose-ha.yml
+# DEMONSTRAÇÃO CONCEITUAL DE ALTA DISPONIBILIDADE COM pg_auto_failover
+# Este arquivo mostra como seria uma arquitetura HA real (não executável neste ambiente)
+
+version: '3.8'
+
+networks:
+  citus_ha:
+    name: adtech_cluster_ha
+    driver: bridge
+
+volumes:
+  monitor_data:
+  coordinator_primary_data:
+  coordinator_standby_data:
+  worker1a_data:
+  worker1b_data:
+  worker2a_data:
+  worker2b_data:
+
+services:
+  # ===========================================
+  # PG_AUTO_FAILOVER MONITOR
+  # ===========================================
+  monitor:
+    image: citusdata/pg_auto_failover:latest
+    container_name: adtech_monitor
+    hostname: monitor
+    networks:
+      - citus_ha
+    ports:
+      - "5433:5432"
+    volumes:
+      - monitor_data:/var/lib/postgresql/data
+    environment:
+      PGUSER: autoctl_node
+      PGPASSWORD: autoctl_node
+      PG_AUTOCTL_HBA_LAN: true
+    command: |
+      bash -c "
+        pg_autoctl create monitor \
+          --ssl-self-signed \
+          --auth trust \
+          --skip-pg-hba \
+          --run
+      "
+    
+  # ===========================================
+  # COORDINATOR - PRIMARY/STANDBY PAIR
+  # ===========================================
+  coordinator-primary:
+    image: citusdata/citus:12.1
+    container_name: adtech_coordinator_primary
+    hostname: coordinator-primary
+    networks:
+      - citus_ha
+    ports:
+      - "5432:5432"
+    volumes:
+      - coordinator_primary_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: adtech_platform
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PG_AUTOCTL_HBA_LAN: true
+    depends_on:
+      - monitor
+    command: |
+      bash -c "
+        pg_autoctl create coordinator \
+          --pgdata /var/lib/postgresql/data \
+          --monitor postgres://autoctl_node:autoctl_node@monitor:5432/pg_auto_failover \
+          --ssl-self-signed \
+          --auth trust \
+          --skip-pg-hba \
+          --run
+      "
+      
+  coordinator-standby:
+    image: citusdata/citus:12.1
+    container_name: adtech_coordinator_standby
+    hostname: coordinator-standby  
+    networks:
+      - citus_ha
+    ports:
+      - "5434:5432"
+    volumes:
+      - coordinator_standby_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PG_AUTOCTL_HBA_LAN: true
+    depends_on:
+      - monitor
+      - coordinator-primary
+    command: |
+      bash -c "
+        sleep 30 && \
+        pg_autoctl create coordinator \
+          --pgdata /var/lib/postgresql/data \
+          --monitor postgres://autoctl_node:autoctl_node@monitor:5432/pg_auto_failover \
+          --ssl-self-signed \
+          --auth trust \
+          --skip-pg-hba \
+          --run
+      "
+
+  # ===========================================
+  # WORKER GROUP 1 - PRIMARY/STANDBY PAIR
+  # ===========================================
+  worker-1a:
+    image: citusdata/citus:12.1
+    container_name: adtech_worker_1a
+    hostname: worker-1a
+    networks:
+      - citus_ha
+    ports:
+      - "5435:5432"
+    volumes:
+      - worker1a_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PG_AUTOCTL_HBA_LAN: true
+    depends_on:
+      - monitor
+      - coordinator-primary
+    command: |
+      bash -c "
+        sleep 60 && \
+        pg_autoctl create worker \
+          --pgdata /var/lib/postgresql/data \
+          --monitor postgres://autoctl_node:autoctl_node@monitor:5432/pg_auto_failover \
+          --group 1 \
+          --ssl-self-signed \
+          --auth trust \
+          --skip-pg-hba \
+          --run
+      "
+      
+  worker-1b:
+    image: citusdata/citus:12.1
+    container_name: adtech_worker_1b
+    hostname: worker-1b
+    networks:
+      - citus_ha
+    ports:
+      - "5436:5432"
+    volumes:
+      - worker1b_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+      PGPASSWORD: postgres  
+      PG_AUTOCTL_HBA_LAN: true
+    depends_on:
+      - monitor
+      - worker-1a
+    command: |
+      bash -c "
+        sleep 90 && \
+        pg_autoctl create worker \
+          --pgdata /var/lib/postgresql/data \
+          --monitor postgres://autoctl_node:autoctl_node@monitor:5432/pg_auto_failover \
+          --group 1 \
+          --ssl-self-signed \
+          --auth trust \
+          --skip-pg-hba \
+          --run
+      "
+
+  # ===========================================
+  # WORKER GROUP 2 - PRIMARY/STANDBY PAIR  
+  # ===========================================
+  worker-2a:
+    image: citusdata/citus:12.1
+    container_name: adtech_worker_2a
+    hostname: worker-2a
+    networks:
+      - citus_ha
+    ports:
+      - "5437:5432"
+    volumes:
+      - worker2a_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PG_AUTOCTL_HBA_LAN: true
+    depends_on:
+      - monitor
+      - coordinator-primary
+    command: |
+      bash -c "
+        sleep 120 && \
+        pg_autoctl create worker \
+          --pgdata /var/lib/postgresql/data \
+          --monitor postgres://autoctl_node:autoctl_node@monitor:5432/pg_auto_failover \
+          --group 2 \
+          --ssl-self-signed \
+          --auth trust \
+          --skip-pg-hba \
+          --run
+      "
+      
+  worker-2b:
+    image: citusdata/citus:12.1
+    container_name: adtech_worker_2b
+    hostname: worker-2b
+    networks:
+      - citus_ha
+    ports:
+      - "5438:5432"
+    volumes:
+      - worker2b_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PG_AUTOCTL_HBA_LAN: true
+    depends_on:
+      - monitor
+      - worker-2a
+    command: |
+      bash -c "
+        sleep 150 && \
+        pg_autoctl create worker \
+          --pgdata /var/lib/postgresql/data \
+          --monitor postgres://autoctl_node:autoctl_node@monitor:5432/pg_auto_failover \
+          --group 2 \
+          --ssl-self-signed \
+          --auth trust \
+          --skip-pg-hba \
+          --run
+      "
+
+  # ===========================================
+  # MONITORING & OBSERVABILITY
+  # ===========================================
+  ha-prometheus:
+    image: prom/prometheus:latest
+    container_name: adtech_ha_prometheus
+    hostname: ha-prometheus
+    networks:
+      - citus_ha
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus-ha.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      
+  ha-grafana:
+    image: grafana/grafana:latest
+    container_name: adtech_ha_grafana
+    hostname: ha-grafana
+    networks:
+      - citus_ha
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana-ha-dashboards:/var/lib/grafana/dashboards
