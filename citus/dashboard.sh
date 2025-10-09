@@ -22,7 +22,8 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Configurações
-COMPOSE_PROJECT_NAME="adtech_cluster"
+COMPOSE_PROJECT_NAME="adtech_cluster_ha"
+COORDINATOR_CONTAINER="adtech_coordinator_primary"
 DB_NAME="adtech_platform"
 
 # Função para limpar tela
@@ -40,6 +41,7 @@ clear_screen() {
 ║       ╚═╝    ╚═════╝ ╚═════╝      ╚═════╝╚═╝   ╚═╝    ╚═════╝ ╚══════╝      ║
 ║                                                                              ║
 ║               🎓 LABORATÓRIO EDUCACIONAL DE SHARDING                        ║
+║                 🔄 Alta Disponibilidade com pg_auto_failover                ║
 ║                    Bancos de Dados Distribuídos                             ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -53,24 +55,24 @@ show_cluster_status() {
     echo "════════════════════"
     
     # Verificação mais robusta do master
-    MASTER_RUNNING=$(docker ps --format "{{.Names}}" | grep "^${COMPOSE_PROJECT_NAME}_master$" | wc -l)
+    MASTER_RUNNING=$(docker ps --format "{{.Names}}" | grep "^adtech_coordinator_primary$" | wc -l)
     
     if [ "$MASTER_RUNNING" -gt 0 ]; then
         echo -e "${GREEN}✅ Cluster: ATIVO${NC}"
         
-        if docker exec "${COMPOSE_PROJECT_NAME}_master" pg_isready -U postgres > /dev/null 2>&1; then
+        if docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
             echo -e "${GREEN}✅ PostgreSQL: RODANDO${NC}"
             
             # Verificar database primeiro
-            if docker exec -i "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
+            if docker exec -i "adtech_coordinator_primary" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
                 echo -e "${GREEN}✅ Database: $DB_NAME criado${NC}"
                 
                 # Verificar workers só se database existir
-                worker_count=$(docker exec -i "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM master_get_active_worker_nodes();" 2>/dev/null | xargs 2>/dev/null || echo "0")
+                worker_count=$(docker exec -i "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM master_get_active_worker_nodes();" 2>/dev/null | xargs 2>/dev/null || echo "0")
                 echo -e "${GREEN}✅ Workers: $worker_count ativos${NC}"
                 
                 # Verificar tabelas
-                table_count=$(docker exec -i "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null | xargs 2>/dev/null || echo "0")
+                table_count=$(docker exec -i "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null | xargs 2>/dev/null || echo "0")
                 echo -e "${GREEN}✅ Tabelas: $table_count criadas${NC}"
             else
                 echo -e "${YELLOW}⚠️  Database: Não criado${NC}"
@@ -103,17 +105,17 @@ show_cluster_status() {
 # Função para mostrar estatísticas rápidas
 show_quick_stats() {
     # Verificar se master está rodando
-    if ! docker ps --format "{{.Names}}" | grep -q "^${COMPOSE_PROJECT_NAME}_master$"; then
+    if ! docker ps --format "{{.Names}}" | grep -q "^adtech_coordinator_primary$"; then
         return
     fi
     
     # Verificar se PostgreSQL está respondende
-    if ! docker exec "${COMPOSE_PROJECT_NAME}_master" pg_isready -U postgres > /dev/null 2>&1; then
+    if ! docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
         return
     fi
     
     # Verificar se database existe
-    if ! docker exec -i "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
+    if ! docker exec -i "adtech_coordinator_primary" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
         return
     fi
     
@@ -121,7 +123,7 @@ show_quick_stats() {
     echo "══════════════════════"
     
     # Tentar obter estatísticas
-    if docker exec -i "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -d "$DB_NAME" -c "
+    if docker exec -i "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME" -c "
     SELECT 
         'Empresas'::text as item,
         COUNT(*)::text as quantidade
@@ -159,17 +161,98 @@ show_menu() {
     echo -e "${YELLOW}4.${NC} 📈 Scaling Demo         - ${CYAN}Ver rebalanceamento em ação${NC}"
     echo -e "${YELLOW}5.${NC} 🎓 Advanced Features    - ${CYAN}Recursos para produção${NC}"
     echo -e "${YELLOW}6.${NC} 🛡️  HA & Failover        - ${CYAN}Alta disponibilidade e recuperação${NC}"
+    echo -e "${YELLOW}7.${NC} 🏗️  Schema Manager       - ${CYAN}Criar schemas personalizados${NC}"
     echo
     echo -e "${PURPLE}Utilitários:${NC}"
-    echo -e "${YELLOW}7.${NC} 💻 SQL Console          - ${CYAN}Conectar diretamente ao cluster${NC}"
-    echo -e "${YELLOW}8.${NC} 📊 Cluster Monitor      - ${CYAN}Visualizar métricas em tempo real${NC}"
-    echo -e "${YELLOW}9.${NC} 🧹 Cleanup             - ${CYAN}Parar e limpar ambiente${NC}"
-    echo -e "${YELLOW}0.${NC} ❓ Help                 - ${CYAN}Ajuda e documentação${NC}"
+    echo -e "${YELLOW}8.${NC} 💻 SQL Console          - ${CYAN}Conectar diretamente ao cluster${NC}"
+    echo -e "${YELLOW}9.${NC} 📊 Cluster Monitor      - ${CYAN}Visualizar métricas em tempo real${NC}"
+    echo -e "${YELLOW}0.${NC} 🧹 Cleanup             - ${CYAN}Parar e limpar ambiente${NC}"
     echo
     echo
     echo -e "${RED}q.${NC} 🚪 Sair"
     echo
     echo -n -e "${CYAN}Escolha uma opção [0-9,q]: ${NC}"
+}
+
+# Função para Schema Manager
+schema_manager_menu() {
+    clear_screen
+    echo -e "${PURPLE}🏗️  SCHEMA MANAGER${NC}"
+    echo "═══════════════════"
+    echo
+    
+    echo -e "${CYAN}📋 Funcionalidades Disponíveis:${NC}"
+    echo "1. 📊 Listar cenários disponíveis"
+    echo "2. 🏗️  Criar schema completo"
+    echo "3. 📊 Gerar dados de exemplo"
+    echo "4. 📥 Carregar dados no banco" 
+    echo "5. 🎯 Processo completo (schema + dados)"
+    echo "0. ⬅️  Voltar"
+    echo
+    echo -n -e "${CYAN}Escolha uma opção [0-5]: ${NC}"
+    read -r schema_choice
+    
+    case $schema_choice in
+        1)
+            echo -e "${CYAN}📋 Cenários disponíveis:${NC}"
+            ./scripts/schema_manager.sh list
+            echo
+            echo "Pressione Enter para continuar..."
+            read -r
+            ;;
+        2)
+            echo -e "${CYAN}🏗️ Criar schema:${NC}"
+            ./scripts/schema_manager.sh interactive
+            echo
+            echo "Pressione Enter para continuar..."
+            read -r
+            ;;
+        3)
+            echo -n -e "${CYAN}Digite o cenário para gerar dados: ${NC}"
+            read -r scenario
+            if [[ -n "$scenario" ]]; then
+                ./scripts/data_loader.sh generate "$scenario"
+            fi
+            echo
+            echo "Pressione Enter para continuar..."
+            read -r
+            ;;
+        4)
+            echo -n -e "${CYAN}Digite o cenário para carregar dados: ${NC}"
+            read -r scenario
+            if [[ -n "$scenario" ]]; then
+                ./scripts/data_loader.sh load "$scenario"
+            fi
+            echo
+            echo "Pressione Enter para continuar..."
+            read -r
+            ;;
+        5)
+            echo -n -e "${CYAN}Digite o cenário para processo completo: ${NC}"
+            read -r scenario
+            if [[ -n "$scenario" ]]; then
+                echo -e "${YELLOW}🚀 Executando processo completo...${NC}"
+                ./scripts/schema_manager.sh create "$scenario"
+                ./scripts/data_loader.sh full "$scenario"
+            fi
+            echo
+            echo "Pressione Enter para continuar..."
+            read -r
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo -e "${RED}❌ Opção inválida!${NC}"
+            sleep 1
+            schema_manager_menu
+            ;;
+    esac
+    
+    # Recursiva para manter o menu ativo
+    if [[ "$schema_choice" != "0" ]]; then
+        schema_manager_menu
+    fi
 }
 
 # Função para console SQL
@@ -189,7 +272,7 @@ sql_console() {
         return
     fi
     
-    if ! docker ps --format "{{.Names}}" | grep -q "^${COMPOSE_PROJECT_NAME}_master$"; then
+    if ! docker ps --format "{{.Names}}" | grep -q "^adtech_coordinator_primary$"; then
         echo -e "${RED}❌ Cluster não está rodando!${NC}"
         echo "Execute o Módulo 2 primeiro."
         echo
@@ -198,7 +281,7 @@ sql_console() {
         return
     fi
     
-    if ! docker exec "${COMPOSE_PROJECT_NAME}_master" pg_isready -U postgres > /dev/null 2>&1; then
+    if ! docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
         echo -e "${RED}❌ Cluster não está rodando!${NC}"
         echo "Execute o Módulo 2 primeiro."
         echo
@@ -207,7 +290,7 @@ sql_console() {
         return
     fi
     
-    if ! docker exec "${COMPOSE_PROJECT_NAME}_master" pg_isready -U postgres > /dev/null 2>&1; then
+    if ! docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
         echo -e "${RED}❌ PostgreSQL não está respondendo!${NC}"
         echo "Aguarde alguns segundos e tente novamente."
         echo
@@ -222,7 +305,7 @@ sql_console() {
     echo
     
     # Conectar diretamente ao PostgreSQL
-    docker exec -it "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -d "$DB_NAME"
+    docker exec -it "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME"
     
     # Mensagem após sair do psql
     echo
@@ -238,7 +321,7 @@ cluster_monitor() {
     echo "════════════════════════"
     echo
     
-    if ! docker exec "${COMPOSE_PROJECT_NAME}_master" pg_isready -U postgres > /dev/null 2>&1; then
+    if ! docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
         echo -e "${RED}❌ Cluster não está rodando!${NC}"
         echo
         echo "Pressione Enter para voltar..."
@@ -247,7 +330,7 @@ cluster_monitor() {
     fi
     
     echo -e "${CYAN}📈 Distribuição de Shards:${NC}"
-    docker exec -i "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -d "$DB_NAME" -c "
+    docker exec -i "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME" -c "
     SELECT 
         n.nodename,
         n.nodeport,
@@ -262,7 +345,7 @@ cluster_monitor() {
     
     echo
     echo -e "${CYAN}🔍 Tamanho das Tabelas:${NC}"
-    docker exec -i "${COMPOSE_PROJECT_NAME}_master" psql -U postgres -d "$DB_NAME" -c "
+    docker exec -i "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME" -c "
     SELECT 
         schemaname, 
         tablename, 
@@ -323,10 +406,12 @@ show_help() {
     echo
     echo -e "${CYAN}📚 Ordem Recomendada:${NC}"
     echo "1. Crisis Simulator - Entenda o problema"
-    echo "2. Hands-on Setup - Configure o ambiente"
-    echo "3. Query Experiments - Teste consultas"
-    echo "4. Scaling Demo - Veja scaling em ação"
-    echo "5. Advanced Features - Recursos avançados"
+    echo "2. Simple Setup - Configure o ambiente (ou use Schema Manager)"
+    echo "3. Schema Manager - Crie schemas personalizados"
+    echo "4. Query Experiments - Teste consultas"
+    echo "5. Scaling Demo - Veja scaling em ação"
+    echo "6. Advanced Features - Recursos avançados"
+    echo "7. HA & Failover - Alta disponibilidade"
     echo
     echo -e "${CYAN}🛠️  Pré-requisitos:${NC}"
     echo "• Docker & Docker Compose instalados"
@@ -379,19 +464,19 @@ main() {
                 ./06_ha_failover.sh
                 ;;
             7)
+                schema_manager_menu
+                ;;
+            8)
                 sql_console
                 clear
                 ;;
-            8)
+            9)
                 cluster_monitor
                 clear
                 ;;
-            9)
+            0)
                 cleanup_environment
                 clear
-                ;;
-            0)
-                show_help
                 ;;
             q|Q|quit|exit)
                 echo -e "${GREEN}👋 Obrigado por usar o laboratório!${NC}"
