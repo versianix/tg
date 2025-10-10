@@ -135,21 +135,20 @@ parse_yaml_config() {
 create_database() {
     local db_name="$1"
     
-    log "INFO" "Criando database: $db_name"
+    log "INFO" "Verificando database: $db_name"
     
     # Verificar se database já existe
     if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt | cut -d \| -f 1 | grep -qw "$db_name"; then
-        log "WARNING" "Database '$db_name' já existe. Removendo..."
-        docker exec "$COORDINATOR_CONTAINER" psql -U postgres -c "DROP DATABASE IF EXISTS $db_name;"
+        log "INFO" "Database '$db_name' já existe. Reutilizando..."
+    else
+        log "INFO" "Criando database: $db_name"
+        docker exec "$COORDINATOR_CONTAINER" psql -U postgres -c "CREATE DATABASE $db_name;"
     fi
     
-    # Criar database
-    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -c "CREATE DATABASE $db_name;"
-    
-    # Criar extensão Citus
+    # Criar extensão Citus (se não existir)
     docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$db_name" -c "CREATE EXTENSION IF NOT EXISTS citus;"
     
-    log "SUCCESS" "Database '$db_name' criado com extensão Citus"
+    log "SUCCESS" "Database '$db_name' pronto com extensão Citus"
 }
 
 # Função para criar uma tabela baseada na configuração YAML
@@ -158,6 +157,12 @@ create_table() {
     local config_file="$2"
     
     log "INFO" "Criando tabela: $table_name"
+    
+    # Verificar se tabela já existe
+    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "\dt" | grep -qw "$table_name"; then
+        log "WARNING" "Tabela '$table_name' já existe. Pulando criação..."
+        return 0
+    fi
     
     # Extrair configuração da tabela
     local table_type=$(yq eval ".tables.${table_name}.type" "$config_file")
