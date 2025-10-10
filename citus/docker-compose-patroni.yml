@@ -1,0 +1,285 @@
+# Docker Compose para Citus + Patroni seguindo arquitetura oficial
+# Baseado em: https://www.citusdata.com/blog/2023/03/06/patroni-3-0-and-citus-scalable-ha-postgres/
+# Fonte: https://github.com/zalando/patroni/blob/master/docker-compose-citus.yml
+
+version: "3.8"
+
+networks:
+  citus_net:
+    driver: bridge
+
+services:
+  # ============================================================================
+  # ETCD CLUSTER (3 nodes para consenso via Raft)
+  # ============================================================================
+  etcd1: &etcd_base
+    image: quay.io/coreos/etcd:v3.5.10
+    networks: [citus_net]
+    environment:
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: citus-cluster
+      ETCD_UNSUPPORTED_ARCH: arm64
+    container_name: citus_etcd1
+    hostname: etcd1
+    command: etcd --name etcd1 --initial-advertise-peer-urls http://etcd1:2380 --advertise-client-urls http://etcd1:2379
+    volumes:
+      - etcd1_data:/etcd-data
+    restart: unless-stopped
+
+  etcd2:
+    <<: *etcd_base
+    container_name: citus_etcd2
+    hostname: etcd2
+    command: etcd --name etcd2 --initial-advertise-peer-urls http://etcd2:2380 --advertise-client-urls http://etcd2:2379
+    volumes:
+      - etcd2_data:/etcd-data
+
+  etcd3:
+    <<: *etcd_base
+    container_name: citus_etcd3
+    hostname: etcd3
+    command: etcd --name etcd3 --initial-advertise-peer-urls http://etcd3:2380 --advertise-client-urls http://etcd3:2379
+    volumes:
+      - etcd3_data:/etcd-data
+
+  # ============================================================================
+  # HAPROXY (apenas para acesso externo ao coordinator)
+  # ============================================================================
+  haproxy:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_haproxy
+    hostname: haproxy
+    ports:
+      - "5432:5000"  # Acesso ao coordinator primary
+      - "8008:8008"  # Patroni REST API
+    command: haproxy
+    environment: &base_env
+      # ETCD Configuration
+      ETCDCTL_ENDPOINTS: http://etcd1:2379,http://etcd2:2379,http://etcd3:2379
+      PATRONI_ETCD3_HOSTS: "etcd1:2379,etcd2:2379,etcd3:2379"
+      
+      # Citus Configuration
+      PATRONI_SCOPE: citus-cluster
+      PATRONI_CITUS_DATABASE: citus
+      
+      # PostgreSQL Configuration
+      POSTGRES_PASSWORD: postgres
+      PGSSLMODE: prefer
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  # ============================================================================
+  # COORDINATOR CLUSTER (3 nodes: 1 primary + 2 standbys)
+  # ============================================================================
+  coordinator1:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_coordinator1
+    hostname: coordinator1
+    environment:
+      <<: *base_env
+      PATRONI_NAME: coordinator1
+      PATRONI_CITUS_GROUP: 0  # Coordinator group
+    volumes:
+      - coordinator1_data:/home/postgres/data
+      - ./config:/config:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  coordinator2:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_coordinator2
+    hostname: coordinator2
+    environment:
+      <<: *base_env
+      PATRONI_NAME: coordinator2
+      PATRONI_CITUS_GROUP: 0
+    volumes:
+      - coordinator2_data:/home/postgres/data
+      - ./config:/config:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  coordinator3:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_coordinator3
+    hostname: coordinator3
+    environment:
+      <<: *base_env
+      PATRONI_NAME: coordinator3
+      PATRONI_CITUS_GROUP: 0
+    volumes:
+      - coordinator3_data:/home/postgres/data
+      - ./config:/config:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  # ============================================================================
+  # WORKER CLUSTER 1 (2 nodes: 1 primary + 1 standby)
+  # ============================================================================
+  worker1_primary:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_worker1_primary
+    hostname: worker1-primary
+    environment:
+      <<: *base_env
+      PATRONI_NAME: worker1-primary
+      PATRONI_CITUS_GROUP: 1  # Worker group 1
+    volumes:
+      - worker1_primary_data:/home/postgres/data
+      - ./config:/config:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  worker1_standby:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_worker1_standby
+    hostname: worker1-standby
+    environment:
+      <<: *base_env
+      PATRONI_NAME: worker1-standby
+      PATRONI_CITUS_GROUP: 1
+    volumes:
+      - worker1_standby_data:/home/postgres/data
+      - ./config:/config:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  # ============================================================================
+  # WORKER CLUSTER 2 (2 nodes: 1 primary + 1 standby)
+  # ============================================================================
+  worker2_primary:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_worker2_primary
+    hostname: worker2-primary
+    environment:
+      <<: *base_env
+      PATRONI_NAME: worker2-primary
+      PATRONI_CITUS_GROUP: 2  # Worker group 2
+    volumes:
+      - worker2_primary_data:/home/postgres/data
+      - ./config:/config:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  worker2_standby:
+    image: citus-patroni:latest
+    networks: [citus_net]
+    container_name: citus_worker2_standby
+    hostname: worker2-standby
+    environment:
+      <<: *base_env
+      PATRONI_NAME: worker2-standby
+      PATRONI_CITUS_GROUP: 2
+    volumes:
+      - worker2_standby_data:/home/postgres/data
+      - ./config:/config:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    restart: unless-stopped
+
+  # ============================================================================
+  # MONITORING & OBSERVABILITY (reutilizando dashboard existente)
+  # ============================================================================
+  postgres_exporter_patroni:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: citus_postgres_exporter_patroni
+    hostname: postgres-exporter-patroni
+    networks: [citus_net]
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@haproxy:5000/citus?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - haproxy
+    restart: unless-stopped
+
+  prometheus_patroni:
+    image: prom/prometheus:latest
+    container_name: citus_prometheus_patroni
+    hostname: prometheus-patroni
+    networks: [citus_net]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus-patroni.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_patroni_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - postgres_exporter_patroni
+    restart: unless-stopped
+
+  grafana_patroni:
+    image: grafana/grafana:latest
+    container_name: citus_grafana_patroni
+    hostname: grafana-patroni
+    networks: [citus_net]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana_patroni_data:/var/lib/grafana
+    depends_on:
+      - prometheus_patroni
+    restart: unless-stopped
+
+volumes:
+  # ETCD volumes
+  etcd1_data:
+  etcd2_data:
+  etcd3_data:
+  
+  # Coordinator volumes
+  coordinator1_data:
+  coordinator2_data:
+  coordinator3_data:
+  
+  # Worker volumes
+  worker1_primary_data:
+  worker1_standby_data:
+  worker2_primary_data:
+  worker2_standby_data:
+  
+  # Monitoring volumes
+  prometheus_patroni_data:
+  grafana_patroni_data:
