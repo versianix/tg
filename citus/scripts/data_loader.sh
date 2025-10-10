@@ -84,7 +84,7 @@ list_tables() {
     log "INFO" "Tabelas disponíveis no tables.yml:"
     echo
     
-    yq eval '.tables | keys' config/tables.yml | while read -r table; do
+    yq eval '.tables | keys' config/tables.yml | grep '^-' | sed 's/^- //' | while read -r table; do
         if [[ "$table" != "null" && "$table" != "---" ]]; then
             local table_name=$(echo "$table" | sed 's/^- //')
             local table_type=$(yq eval ".tables.\"$table_name\".type" config/tables.yml)
@@ -159,6 +159,10 @@ load_table_data() {
     # Copia o arquivo CSV para dentro do container
     docker cp "$csv_file" "$COORDINATOR_CONTAINER:/tmp/${table_name}.csv"
     
+    # Limpar dados existentes para evitar conflitos
+    log "INFO" "Limpando dados existentes da tabela '$table_name'..."
+    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus_platform -c "TRUNCATE TABLE $table_name CASCADE;" 2>/dev/null || true
+    
     # Executa COPY para carregar os dados
     local copy_command="\\COPY $table_name FROM '/tmp/${table_name}.csv' WITH (FORMAT csv, HEADER true);"
     
@@ -184,10 +188,10 @@ load_all_data() {
     log "INFO" "Iniciando carregamento de dados de todas as tabelas..."
     echo
     
-    # Verifica se diretório CSV existe
+    # Verificar se diretório CSV existe
     if [[ ! -d "$CSV_DIR" ]]; then
-        log "ERROR" "Diretório de CSVs não encontrado: $CSV_DIR"
-        log "INFO" "Crie o diretório e adicione seus arquivos CSV:"
+        log "ERROR" "Diretório CSV não encontrado: $CSV_DIR"
+        log "INFO" "Crie o diretório e adicione arquivos CSV:"
         log "INFO" "  mkdir -p $CSV_DIR"
         log "INFO" "  # Adicione seus arquivos: companies.csv, campaigns.csv, etc."
         return 1
@@ -196,23 +200,21 @@ load_all_data() {
     local success_count=0
     local error_count=0
     
-    # Obtém lista de tabelas do config
-    yq eval '.tables | keys' config/tables.yml | while read -r table; do
-        if [[ "$table" != "null" && "$table" != "---" ]]; then
-            local table_name=$(echo "$table" | sed 's/^- //')
-            
-            if check_csv_exists "$table_name"; then
-                if load_table_data "$table_name"; then
-                    ((success_count++))
-                else
-                    ((error_count++))
-                fi
+    # Obtém lista de tabelas e processa uma por vez
+    local tables=$(yq eval '.tables | keys' config/tables.yml | grep '^-' | sed 's/^- //')
+    
+    for table in $tables; do
+        if check_csv_exists "$table"; then
+            if load_table_data "$table"; then
+                ((success_count++))
             else
-                log "WARNING" "CSV não encontrado para tabela '$table_name' (esperado: $CSV_DIR/${table_name}.csv)"
                 ((error_count++))
             fi
-            echo
+        else
+            log "WARNING" "CSV não encontrado para tabela '$table' (esperado: $CSV_DIR/${table}.csv)"
+            ((error_count++))
         fi
+        echo
     done
     
     log "INFO" "Carregamento concluído: $success_count sucessos, $error_count erros"
