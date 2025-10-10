@@ -23,10 +23,10 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Configurações
-COMPOSE_PROJECT_NAME="citus_cluster_ha"
+COMPOSE_PROJECT_NAME="citus"
 CONFIG_DIR="config"
 SCENARIOS_DIR="$CONFIG_DIR/scenarios"
-COORDINATOR_CONTAINER="citus_coordinator_primary"
+COORDINATOR_CONTAINER=""  # Será detectado dinamicamente
 
 # Função para logs formatados
 log() {
@@ -42,6 +42,35 @@ log() {
         "ERROR") echo -e "${RED}[$timestamp] ❌ $message${NC}" ;;
         "DEBUG") echo -e "${PURPLE}[$timestamp] 🔍 $message${NC}" ;;
     esac
+}
+
+# Função para detectar coordinator líder via API do Patroni
+detect_leader_coordinator() {
+    log "INFO" "Detectando coordinator líder..."
+    
+    # Tenta cada coordinator diretamente
+    for coord in coordinator1 coordinator2 coordinator3; do
+        container_name="citus_$coord"
+        
+        # Verifica se o container está rodando
+        if ! docker ps --format "table {{.Names}}" | grep -q "^$container_name$"; then
+            continue
+        fi
+        
+        # Usa API do Patroni para detectar líder
+        leader=$(docker exec "$container_name" curl -s --connect-timeout 2 localhost:8008/cluster 2>/dev/null | \
+                 grep -o '"name": "[^"]*", "role": "leader"' | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
+        
+        if [ -n "$leader" ]; then
+            COORDINATOR_CONTAINER="citus_$leader"
+            log "SUCCESS" "Líder detectado: $leader"
+            return 0
+        fi
+    done
+    
+    log "WARNING" "Não foi possível detectar líder. Usando coordinator1 (fallback)"
+    COORDINATOR_CONTAINER="citus_coordinator1"
+    return 1
 }
 
 # Função para verificar dependências
@@ -67,9 +96,12 @@ check_dependencies() {
         return 1
     fi
     
+    # Detectar e verificar coordinator líder
+    detect_leader_coordinator || return 1
+    
     # Verificar se cluster está rodando
     if ! docker exec "$COORDINATOR_CONTAINER" pg_isready -U postgres > /dev/null 2>&1; then
-        log "ERROR" "Cluster Citus não está rodando. Execute docker-compose up primeiro"
+        log "ERROR" "Cluster Citus não está rodando ou coordinator líder não está acessível"
         return 1
     fi
     
