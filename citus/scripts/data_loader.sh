@@ -23,12 +23,12 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Configurações
-COMPOSE_PROJECT_NAME="citus_cluster_ha"
+COMPOSE_PROJECT_NAME="citus"
 CONFIG_DIR="config"
 DATA_DIR="$CONFIG_DIR/data"
 CSV_DIR="$CONFIG_DIR/csv"
 SCENARIOS_DIR="$CONFIG_DIR/scenarios"
-COORDINATOR_CONTAINER="citus_coordinator_primary"
+COORDINATOR_CONTAINER=""  # Será detectado dinamicamente
 
 # Função para logs formatados
 log() {
@@ -43,6 +43,36 @@ log() {
         "WARNING") echo -e "${YELLOW}[$timestamp] ⚠️  $message${NC}" ;;
         "ERROR") echo -e "${RED}[$timestamp] ❌ $message${NC}" ;;
     esac
+}
+
+# Função para detectar coordinator líder via API do Patroni
+detect_leader_coordinator() {
+    log "INFO" "Detectando coordinator líder..."
+    
+    # Tenta cada coordinator diretamente
+    for coord in coordinator1 coordinator2 coordinator3; do
+        container_name="citus_$coord"
+        
+        # Verifica se o container está rodando (versão que funcionou)
+        docker_output=$(docker ps | grep "$container_name" || true)
+        if [ -z "$docker_output" ]; then
+            continue
+        fi
+        
+        # Usa API do Patroni para detectar líder
+        leader=$(docker exec "$container_name" curl -s --connect-timeout 2 localhost:8008/cluster 2>/dev/null | \
+                 grep -o '"name": "[^"]*", "role": "leader"' | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
+        
+        if [ -n "$leader" ]; then
+            COORDINATOR_CONTAINER="citus_$leader"
+            log "SUCCESS" "Líder detectado: $leader"
+            return 0
+        fi
+    done
+    
+    log "WARNING" "Não foi possível detectar líder. Usando coordinator1 (fallback)"
+    COORDINATOR_CONTAINER="citus_coordinator1"
+    return 1
 }
 
 # Função para verificar dependências
@@ -71,7 +101,10 @@ check_dependencies() {
 check_cluster() {
     log "INFO" "Verificando se cluster Citus está rodando..."
     
-    if ! docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus_platform -c "SELECT 1;" &> /dev/null; then
+    # Detectar coordinator líder
+    detect_leader_coordinator || return 1
+    
+    if ! docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "SELECT 1;" &> /dev/null; then
         log "ERROR" "Cluster Citus HA não está acessível"
         exit 1
     fi
@@ -161,16 +194,16 @@ load_table_data() {
     
     # Limpar dados existentes para evitar conflitos
     log "INFO" "Limpando dados existentes da tabela '$table_name'..."
-    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus_platform -c "TRUNCATE TABLE $table_name CASCADE;" 2>/dev/null || true
+    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "TRUNCATE TABLE $table_name CASCADE;" 2>/dev/null || true
     
     # Executa COPY para carregar os dados
     local copy_command="\\COPY $table_name FROM '/tmp/${table_name}.csv' WITH (FORMAT csv, HEADER true);"
     
-    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus_platform -c "$copy_command"; then
+    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "$copy_command"; then
         log "SUCCESS" "Dados carregados com sucesso para tabela '$table_name'"
         
         # Mostra estatísticas
-        local count=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus_platform -t -c "SELECT COUNT(*) FROM $table_name;" | xargs)
+        local count=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -t -c "SELECT COUNT(*) FROM $table_name;" | xargs)
         log "INFO" "Total de registros na tabela '$table_name': $count"
         
         # Remove arquivo temporário
