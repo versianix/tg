@@ -102,6 +102,10 @@ docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt | cut -d \| -f 1 | gr
 log_step "Configurando Citus no coordinator..."
 docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS citus;"
 
+# Configurar hostname do coordinator para permitir conexões dos workers
+log_step "Configurando hostname do coordinator..."
+docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT citus_set_coordinator_host('$COORDINATOR_CONTAINER');"
+
 # Configurar workers com HA completo
 log_step "Configurando workers com HA..."
 
@@ -132,10 +136,10 @@ sleep 5
 
 # Registrar workers através dos load balancers para failover automático
 echo -e "${CYAN}📝 Registrando worker1 via HAProxy (com failover)...${NC}"
-docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT citus_add_node('worker1-lb', 5432);" 2>/dev/null || echo "Worker1-LB já registrado ou erro"
+docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT master_add_node('citus_haproxy_worker1', 5432);" || echo "⚠️ Worker1-LB já registrado ou houve erro"
 
 echo -e "${CYAN}📝 Registrando worker2 via HAProxy (com failover)...${NC}"
-docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT citus_add_node('worker2-lb', 5432);" 2>/dev/null || echo "Worker2-LB já registrado ou erro"
+docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT master_add_node('citus_haproxy_worker2', 5432);" || echo "⚠️ Worker2-LB já registrado ou houve erro"
 
 echo -e "${CYAN}✅ Workers registrados via HAProxy - failover automático ativo!${NC}"
 
@@ -144,10 +148,10 @@ sleep 5
 
 # Verificar workers ativos
 log_step "Verificando workers ativos..."
-WORKER_COUNT=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM citus_get_active_worker_nodes();" 2>/dev/null | tr -d ' ')
+WORKER_COUNT=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM master_get_active_worker_nodes();" 2>/dev/null | tr -d ' ')
 
 echo -e "${CYAN}📋 Workers registrados:${NC}"
-docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT * FROM citus_get_active_worker_nodes();"
+docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT * FROM master_get_active_worker_nodes();"
 
 if [ "$WORKER_COUNT" -eq 2 ]; then
     log_step "✅ Cluster configurado com sucesso! 2 workers ativos."
@@ -162,10 +166,10 @@ echo "════════════════════════�
 
 # Mostrar status do cluster
 log_step "Status do cluster Citus:"
-docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT * FROM citus_get_active_worker_nodes();"
+docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "SELECT * FROM master_get_active_worker_nodes();"
 
 # Verificar workers ativos
-WORKER_COUNT=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM citus_get_active_worker_nodes();" 2>/dev/null | tr -d ' ')
+WORKER_COUNT=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM master_get_active_worker_nodes();" 2>/dev/null | tr -d ' ')
 
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║                🎯 CLUSTER CITUS CONFIGURADO!                 ║${NC}"
