@@ -1,0 +1,57 @@
+# Dockerfile para Citus + Patroni
+# Usar imagem oficial do Citus que já tem tudo configurado
+FROM citusdata/citus:postgres_15
+
+# Definir variáveis de ambiente
+ENV PGHOME=/home/postgres
+ENV PGDATA=${PGHOME}/data
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+ENV ETCDCTL_API=3
+
+# Mudar para root para instalações
+USER root
+
+# Instalar dependências do Patroni
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-dev \
+        curl wget less jq haproxy sudo \
+        net-tools iputils-ping dumb-init \
+        build-essential libpq-dev \
+    && pip3 install --break-system-packages \
+        patroni[etcd3]==3.2.2 \
+        psycopg2-binary \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configurar locale
+RUN echo 'en_US.UTF-8 UTF-8' > /usr/share/i18n/SUPPORTED \
+    && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+
+# Instalar etcd client  
+RUN curl -sL https://github.com/coreos/etcd/releases/download/v3.5.10/etcd-v3.5.10-linux-arm64.tar.gz \
+    | tar xz -C /usr/local/bin --strip=1 --wildcards --no-anchored etcd etcdctl \
+    && chmod +x /usr/local/bin/etcd* || true
+
+# Configurar HAProxy
+RUN echo 'global\n    stats socket /run/haproxy/admin.sock mode 660 level admin' > /etc/haproxy/haproxy.cfg
+
+# Preparar diretórios e permissões
+RUN mkdir -p ${PGHOME}/.config/patroni /patroni /run/haproxy ${PGDATA} \
+    && sed -i "s|/var/lib/postgresql.*|${PGHOME}:/bin/bash|" /etc/passwd \
+    && chown -R postgres:postgres ${PGHOME} ${PGDATA} /var/log /run /etc/haproxy \
+    && chmod 700 ${PGDATA} \
+    && chmod +s /bin/ping
+
+# Copiar configurações
+COPY scripts/entrypoint.sh /entrypoint.sh
+
+# Corrigir permissões
+RUN chown postgres:postgres /entrypoint.sh \
+    && chmod +x /entrypoint.sh
+
+USER postgres
+WORKDIR ${PGHOME}
+
+ENTRYPOINT ["/entrypoint.sh"]
