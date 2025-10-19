@@ -1,20 +1,13 @@
 #!/bin/bash
 
-# ██████╗  █████╗ ███████╗██╗  ██╗██████╗  ██████╗  █████╗ ██████╗ ██╗██████╗ 
-# ██╔══██╗██╔══██╗██╔════╝██║  ██║██╔══██╗██╔═══██╗██╔══██╗██╔══██╗██║██╔══██╗
-# ██║  ██║███████║███████╗███████║██████╔╝██║     echo -e "${BLUE}🎯 MÓDULOS DISPONÍVEIS${NC}"
-    echo "════════════════════="
-    echo
-    echo -e "${YELLOW}1.${NC} 🛠️  Simple Setup         - ${CYAN}Configurar cluster (Apple Silicon)${NC}"
-    echo -e "${YELLOW}2.${NC} 🔍 Query Experiments    - ${CYAN}Testar consultas distribuídas${NC}"
-    echo -e "${YELLOW}3.${NC} 🛡️  HA & Failover        - ${CYAN}Alta disponibilidade e recuperação${NC}"
-    echo -e "${YELLOW}4.${NC} 🏗️  Schema Manager       - ${CYAN}Criar schemas personalizados${NC}"████║██████╔╝██║██║  ██║
-# ██║  ██║██╔══██║╚════██║██╔══██║██╔══██╗██║   ██║██╔══██║██╔══██╗██║██║  ██║
-# ██████╔╝██║  ██║███████║██║  ██║██████╔╝╚██████╔╝██║  ██║██║  ██║██║██████╔╝
-# ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═════╝ 
+# ================================================================================
+#                    LABORATÓRIO DE SHARDING DISTRIBUÍDO
+#                      PostgreSQL + Citus + Patroni + etcd
+#                         Trabalho de Conclusão de Curso
+# ================================================================================
 #
-# 📊 DASHBOARD INTERATIVO: Menu Principal do Laboratório
-# Objetivo: Interface amigável para navegação entre módulos
+# Dashboard Interativo - Menu Principal do Laboratório
+# Objetivo: Interface de controle para navegação entre módulos experimentais
 
 set -uo pipefail
 
@@ -35,138 +28,128 @@ DB_NAME="citus"
 # Função para limpar tela
 clear_screen() {
     clear
-    echo -e "${PURPLE}"
-    cat << 'EOF'
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                                                                              ║
-║    ████████╗ ██████╗ ██████╗      ██████╗██╗████████╗██╗   ██╗███████╗      ║
-║    ╚══██╔══╝██╔════╝██╔════╝     ██╔════╝██║╚══██╔══╝██║   ██║██╔════╝      ║
-║       ██║   ██║     ██║          ██║     ██║   ██║   ██║   ██║███████╗      ║
-║       ██║   ██║     ██║          ██║     ██║   ██║   ██║   ██║╚════██║      ║
-║       ██║   ╚██████╗╚██████╗     ╚██████╗██║   ██║   ╚██████╔╝███████║      ║
-║       ╚═╝    ╚═════╝ ╚═════╝      ╚═════╝╚═╝   ╚═╝    ╚═════╝ ╚══════╝      ║
-║                                                                              ║
-║               🎓 LABORATÓRIO EDUCACIONAL DE SHARDING                        ║
-║                 🔄 Alta Disponibilidade com PATRONI + CITUS                 ║
-║               📊 Arquitetura Distribuída com Consenso etcd                  ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-EOF
+    echo -e "${BLUE}"
+    echo "================================================================================"
+    echo "                    LABORATÓRIO DE SHARDING DISTRIBUÍDO"
+    echo "                      PostgreSQL + Citus + Patroni + etcd"
+    echo "                         Trabalho de Conclusão de Curso"
+    echo "================================================================================"
     echo -e "${NC}"
+    echo
 }
 
 # Função para mostrar status do cluster
 show_cluster_status() {
-    echo -e "${CYAN}📊 STATUS DA ARQUITETURA PATRONI + CITUS${NC}"
-    echo "═══════════════════════════════════════════"
+    echo -e "${CYAN}STATUS DO CLUSTER${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     # Verificar se há containers rodando
-    CLUSTER_RUNNING=$(docker ps --format "{{.Names}}" | grep -c "^citus_" || echo "0")
+    CLUSTER_RUNNING=$(docker ps --format "{{.Names}}" | grep "^citus_" 2>/dev/null | wc -l | tr -d ' \n' || echo "0")
     
     if [ "$CLUSTER_RUNNING" -gt 0 ]; then
-        echo -e "${GREEN}🏗️  CLUSTER: ATIVO (${CLUSTER_RUNNING} containers)${NC}"
+        echo -e "${GREEN}CLUSTER: ATIVO (${CLUSTER_RUNNING} containers)${NC}"
         echo
         
         # === ETCD CONSENSUS CLUSTER ===
-        echo -e "${PURPLE}⚖️  ETCD CONSENSUS (Raft Algorithm):${NC}"
-        etcd1_status=$(docker ps --format "{{.Names}}" | grep "^citus_etcd1$" && echo "🟢 ATIVO" || echo "🔴 INATIVO")
-        etcd2_status=$(docker ps --format "{{.Names}}" | grep "^citus_etcd2$" && echo "🟢 ATIVO" || echo "🔴 INATIVO")
-        etcd3_status=$(docker ps --format "{{.Names}}" | grep "^citus_etcd3$" && echo "🟢 ATIVO" || echo "🔴 INATIVO")
-        echo "   • etcd1: $etcd1_status"
-        echo "   • etcd2: $etcd2_status"
-        echo "   • etcd3: $etcd3_status"
+        echo -e "${PURPLE}ETCD Consensus Cluster (Algoritmo Raft):${NC}"
+        etcd1_status=$(docker ps --format "{{.Names}}" | grep "^citus_etcd1$" && echo "ATIVO" || echo "INATIVO")
+        etcd2_status=$(docker ps --format "{{.Names}}" | grep "^citus_etcd2$" && echo "ATIVO" || echo "INATIVO")
+        etcd3_status=$(docker ps --format "{{.Names}}" | grep "^citus_etcd3$" && echo "ATIVO" || echo "INATIVO")
+        echo "  - etcd1: $etcd1_status"
+        echo "  - etcd2: $etcd2_status"
+        echo "  - etcd3: $etcd3_status"
         
         # === COORDINATORS PATRONI HA ===
         echo
-        echo -e "${BLUE}🎯 COORDINATORS (Patroni HA):${NC}"
+        echo -e "${BLUE}Coordinators (Alta Disponibilidade com Patroni):${NC}"
         
         # Verificar qual é o líder
-        coord1_role="🔵 RÉPLICA"
-        coord2_role="🔵 RÉPLICA"
-        coord3_role="🔵 RÉPLICA"
+        coord1_role="REPLICA"
+        coord2_role="REPLICA"
+        coord3_role="REPLICA"
         
         if docker logs citus_coordinator1 --tail 1 2>/dev/null | grep -q "leader with the lock"; then
-            coord1_role="🟢 LÍDER"
+            coord1_role="LIDER"
         fi
         if docker logs citus_coordinator2 --tail 1 2>/dev/null | grep -q "leader with the lock"; then
-            coord2_role="🟢 LÍDER"
+            coord2_role="LIDER"
         fi
         if docker logs citus_coordinator3 --tail 1 2>/dev/null | grep -q "leader with the lock"; then
-            coord3_role="🟢 LÍDER"
+            coord3_role="LIDER"
         fi
         
         coord1_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_coordinator1$" && echo "ATIVO" || echo "INATIVO")
         coord2_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_coordinator2$" && echo "ATIVO" || echo "INATIVO")
         coord3_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_coordinator3$" && echo "ATIVO" || echo "INATIVO")
         
-        echo "   • coordinator1: $coord1_role - $coord1_status"
-        echo "   • coordinator2: $coord2_role - $coord2_status"  
-        echo "   • coordinator3: $coord3_role - $coord3_status"
+        echo "  - coordinator1: $coord1_role - $coord1_status"
+        echo "  - coordinator2: $coord2_role - $coord2_status"  
+        echo "  - coordinator3: $coord3_role - $coord3_status"
         
         # === WORKERS PATRONI HA ===
         echo
-        echo -e "${YELLOW}🔧 WORKERS (Patroni HA):${NC}"
-        echo "   Grupo 1:"
-        worker1p_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker1_primary$" && echo "🟢 ATIVO" || echo "🔴 INATIVO")
-        worker1s_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker1_standby$" && echo "🟢 ATIVO" || echo "🔴 INATIVO")
-        echo "     • worker1_primary: $worker1p_status"
-        echo "     • worker1_standby: $worker1s_status"
-        echo "   Grupo 2:"
-        worker2p_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker2_primary$" && echo "🟢 ATIVO" || echo "🔴 INATIVO")
-        worker2s_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker2_standby$" && echo "🟢 ATIVO" || echo "🔴 INATIVO")
-        echo "     • worker2_primary: $worker2p_status"
-        echo "     • worker2_standby: $worker2s_status"
+        echo -e "${YELLOW}Workers (Alta Disponibilidade com Patroni):${NC}"
+        echo "  Grupo 1:"
+        worker1p_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker1_primary$" && echo "ATIVO" || echo "INATIVO")
+        worker1s_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker1_standby$" && echo "ATIVO" || echo "INATIVO")
+        echo "    - worker1_primary: $worker1p_status"
+        echo "    - worker1_standby: $worker1s_status"
+        echo "  Grupo 2:"
+        worker2p_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker2_primary$" && echo "ATIVO" || echo "INATIVO")
+        worker2s_status=$(docker ps --format "{{.Names}}" | grep -q "^citus_worker2_standby$" && echo "ATIVO" || echo "INATIVO")
+        echo "    - worker2_primary: $worker2p_status"
+        echo "    - worker2_standby: $worker2s_status"
         
         # === POSTGRESQL & CITUS STATUS ===
         echo
         if docker exec "citus_coordinator1" pg_isready -U postgres > /dev/null 2>&1; then
-            echo -e "${GREEN}🐘 PostgreSQL: RESPONDENDO${NC}"
+            echo -e "${GREEN}PostgreSQL: OPERACIONAL${NC}"
             
             # Verificar database primeiro
             if docker exec -i "citus_coordinator1" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
-                echo -e "${GREEN}🗄️  Database: $DB_NAME ATIVO${NC}"
+                echo -e "${GREEN}Database: $DB_NAME ATIVO${NC}"
                 
                 # Verificar workers registrados no Citus
                 worker_count=$(docker exec -i "citus_coordinator1" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM citus_get_active_worker_nodes();" 2>/dev/null | xargs 2>/dev/null || echo "0")
-                echo -e "${GREEN}📊 Workers Citus: $worker_count ativos (apenas primários)${NC}"
+                echo -e "${GREEN}Workers Citus: $worker_count ativos${NC}"
                 
                 # Verificar tabelas
                 table_count=$(docker exec -i "citus_coordinator1" psql -U postgres -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null | xargs 2>/dev/null || echo "0")
-                echo -e "${GREEN}📋 Tabelas: $table_count criadas${NC}"
+                echo -e "${GREEN}Tabelas: $table_count criadas${NC}"
             else
-                echo -e "${YELLOW}⚠️  Database: Não criado${NC}"
+                echo -e "${YELLOW}Database: Aguardando criação${NC}"
             fi
         else
-            echo -e "${RED}❌ PostgreSQL: Não responsivo${NC}"
+            echo -e "${RED}PostgreSQL: NÃO RESPONSIVO${NC}"
         fi
         
         # === MONITORAMENTO ===
         echo
-        echo -e "${CYAN}📊 MONITORAMENTO:${NC}"
-        prometheus_running=$(docker ps --format "{{.Names}}" | grep -c "prometheus" || echo "0")
+        echo -e "${CYAN}Ferramentas de Monitoramento:${NC}"
+        prometheus_running=$(docker ps --format "{{.Names}}" | grep -c "prometheus" 2>/dev/null || echo "0")
         if [ "$prometheus_running" -gt 0 ]; then
-            echo -e "${GREEN}   • Prometheus: ✅ http://localhost:9090${NC}"
+            echo -e "${GREEN}  - Prometheus: ATIVO (http://localhost:9090)${NC}"
         else
-            echo -e "${YELLOW}   • Prometheus: ⚠️  Indisponível${NC}"
+            echo -e "${YELLOW}  - Prometheus: INDISPONÍVEL${NC}"
         fi
         
-        grafana_running=$(docker ps --format "{{.Names}}" | grep -c "grafana" || echo "0")
+        grafana_running=$(docker ps --format "{{.Names}}" | grep -c "grafana" 2>/dev/null || echo "0")
         if [ "$grafana_running" -gt 0 ]; then
-            echo -e "${GREEN}   • Grafana: ✅ http://localhost:3000${NC}"
+            echo -e "${GREEN}  - Grafana: ATIVO (http://localhost:3000)${NC}"
         else
-            echo -e "${YELLOW}   • Grafana: ⚠️  Indisponível${NC}"
+            echo -e "${YELLOW}  - Grafana: INDISPONÍVEL${NC}"
         fi
         
-        haproxy_running=$(docker ps --format "{{.Names}}" | grep -c "haproxy" || echo "0")
+        haproxy_running=$(docker ps --format "{{.Names}}" | grep -c "haproxy" 2>/dev/null || echo "0")
         if [ "$haproxy_running" -gt 0 ]; then
-            echo -e "${GREEN}   • HAProxy: ✅ http://localhost:5432${NC}"
+            echo -e "${GREEN}  - HAProxy: ATIVO (http://localhost:5432)${NC}"
         else
-            echo -e "${YELLOW}   • HAProxy: ⚠️  Indisponível${NC}"
+            echo -e "${YELLOW}  - HAProxy: INDISPONÍVEL${NC}"
         fi
         
     else
-        echo -e "${RED}❌ CLUSTER: INATIVO${NC}"
-        echo -e "${YELLOW}💡 Execute o Módulo 2 (Simple Setup) para inicializar${NC}"
+        echo -e "${RED}CLUSTER: INATIVO${NC}"
+        echo -e "${YELLOW}Execute o módulo Simple Setup para inicializar o ambiente${NC}"
     fi
     echo
 }
@@ -188,8 +171,8 @@ show_quick_stats() {
         return
     fi
     
-    echo -e "${CYAN}📈 ESTATÍSTICAS RÁPIDAS${NC}"
-    echo "══════════════════════"
+    echo -e "${CYAN}ESTATÍSTICAS DO BANCO DE DADOS${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     # Tentar obter estatísticas
     if docker exec -i "citus_coordinator1" psql -U postgres -d "$DB_NAME" -c "
@@ -221,40 +204,39 @@ show_menu() {
     show_cluster_status
     show_quick_stats
     
-    echo -e "${BLUE}🎯 MÓDULOS DISPONÍVEIS${NC}"
-    echo "════════════════════="
+    echo -e "${BLUE}MÓDULOS DISPONÍVEIS${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     echo
-    echo -e "${YELLOW}1.${NC} 🔥 Crisis Simulator     - ${CYAN}Por que precisamos de sharding?${NC}"
-    echo -e "${YELLOW}2.${NC} 🛠️  Simple Setup         - ${CYAN}Configurar cluster (Apple Silicon)${NC}"
-    echo -e "${YELLOW}3.${NC} 🔍 Query Experiments    - ${CYAN}Testar consultas distribuídas${NC}"
-    echo -e "${YELLOW}4.${NC} ️  HA & Failover        - ${CYAN}Alta disponibilidade e recuperação${NC}"
-    echo -e "${YELLOW}5.${NC} 🏗️  Schema Manager       - ${CYAN}Criar schemas personalizados${NC}"
+    echo -e "${YELLOW}[1]${NC} Simple Setup         - Configurar cluster distribuído"
+    echo -e "${YELLOW}[2]${NC} Query Experiments    - Testar consultas distribuídas"
+    echo -e "${YELLOW}[3]${NC} HA & Failover        - Alta disponibilidade e recuperação"
+    echo -e "${YELLOW}[4]${NC} Schema Manager       - Criar schemas personalizados"
     echo
-    echo -e "${PURPLE}Utilitários:${NC}"
-    echo -e "${YELLOW}5.${NC} 💻 SQL Console          - ${CYAN}Conectar diretamente ao cluster${NC}"
-    echo -e "${YELLOW}6.${NC} 📊 Cluster Monitor      - ${CYAN}Visualizar métricas em tempo real${NC}"
-    echo -e "${YELLOW}0.${NC} 🧹 Cleanup             - ${CYAN}Parar e limpar ambiente${NC}"
+    echo -e "${PURPLE}UTILITÁRIOS${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
+    echo -e "${YELLOW}[5]${NC} SQL Console          - Conectar diretamente ao cluster"
+    echo -e "${YELLOW}[6]${NC} Cluster Monitor      - Visualizar métricas em tempo real"
+    echo -e "${YELLOW}[0]${NC} Cleanup              - Parar e limpar ambiente"
     echo
+    echo -e "${RED}[q]${NC} Sair"
     echo
-    echo -e "${RED}q.${NC} 🚪 Sair"
-    echo
-    echo -n -e "${CYAN}Escolha uma opção [0-6,q]: ${NC}"
+    echo -n -e "${CYAN}Selecione uma opção [0-6,q]: ${NC}"
 }
 
 # Função para Schema Manager
 schema_manager_menu() {
     clear_screen
-    echo -e "${PURPLE}🏗️  SCHEMA MANAGER${NC}"
-    echo "═══════════════════"
+    echo -e "${PURPLE}SCHEMA MANAGER${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     echo
     
-    echo -e "${CYAN}📋 Funcionalidades Disponíveis:${NC}"
-    echo "1. 📊 Listar cenários disponíveis"
-    echo "2. 🏗️  Criar schema completo"
-    echo "3. 📊 Gerar dados de exemplo"
-    echo "4. 📥 Carregar dados no banco" 
-    echo "5. 🎯 Processo completo (schema + dados)"
-    echo "0. ⬅️  Voltar"
+    echo -e "${CYAN}Funcionalidades Disponíveis:${NC}"
+    echo "[1] Listar cenários disponíveis"
+    echo "[2] Criar schema completo"
+    echo "[3] Gerar dados de exemplo"
+    echo "[4] Carregar dados no banco" 
+    echo "[5] Processo completo (schema + dados)"
+    echo "[0] Voltar"
     echo
     echo -n -e "${CYAN}Escolha uma opção [0-5]: ${NC}"
     read -r schema_choice
@@ -325,8 +307,8 @@ schema_manager_menu() {
 # Função para console SQL
 sql_console() {
     clear_screen
-    echo -e "${PURPLE}💻 SQL CONSOLE INTERATIVO${NC}"
-    echo "═══════════════════════════"
+    echo -e "${PURPLE}CONSOLE SQL INTERATIVO${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     echo
     
     # Verificações básicas
@@ -339,25 +321,25 @@ sql_console() {
         return
     fi
     
-    if ! docker ps --format "{{.Names}}" | grep -q "^adtech_coordinator_primary$"; then
+    if ! docker ps --format "{{.Names}}" | grep -q "^citus_coordinator1$"; then
         echo -e "${RED}❌ Cluster não está rodando!${NC}"
-        echo "Execute o Módulo 2 primeiro."
+        echo "Execute o Módulo 1 primeiro."
         echo
         echo "Pressione Enter para voltar..."
         read -r
         return
     fi
     
-    if ! docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
+    if ! docker exec "citus_coordinator1" pg_isready -U postgres > /dev/null 2>&1; then
         echo -e "${RED}❌ Cluster não está rodando!${NC}"
-        echo "Execute o Módulo 2 primeiro."
+        echo "Execute o Módulo 1 primeiro."
         echo
         echo "Pressione Enter para voltar..."
         read -r
         return
     fi
     
-    if ! docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
+    if ! docker exec "citus_coordinator1" pg_isready -U postgres > /dev/null 2>&1; then
         echo -e "${RED}❌ PostgreSQL não está respondendo!${NC}"
         echo "Aguarde alguns segundos e tente novamente."
         echo
@@ -366,17 +348,17 @@ sql_console() {
         return
     fi
     
-    echo -e "${GREEN}✅ PostgreSQL está rodando!${NC}"
-    echo -e "${CYAN}🐚 Conectando ao console PostgreSQL...${NC}"
-    echo -e "${YELLOW}💡 Para sair, digite \\q e pressione Enter${NC}"
+    echo -e "${GREEN}PostgreSQL está rodando!${NC}"
+    echo -e "${CYAN}Conectando ao console PostgreSQL...${NC}"
+    echo -e "${YELLOW}Para sair, digite \\q e pressione Enter${NC}"
     echo
     
     # Conectar diretamente ao PostgreSQL
-    docker exec -it "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME"
+    docker exec -it "citus_coordinator1" psql -U postgres -d "$DB_NAME"
     
     # Mensagem após sair do psql
     echo
-    echo -e "${GREEN}✅ Sessão SQL finalizada${NC}"
+    echo -e "${GREEN}Sessão SQL finalizada${NC}"
     echo -e "${CYAN}Pressione Enter para voltar ao menu...${NC}"
     read -r
 }
@@ -384,20 +366,20 @@ sql_console() {
 # Função para monitoramento
 cluster_monitor() {
     clear_screen
-    echo -e "${PURPLE}📊 MONITOR DO CLUSTER${NC}"
-    echo "════════════════════════"
+    echo -e "${PURPLE}MONITOR DO CLUSTER${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     echo
     
-    if ! docker exec "adtech_coordinator_primary" pg_isready -U postgres > /dev/null 2>&1; then
-        echo -e "${RED}❌ Cluster não está rodando!${NC}"
+    if ! docker exec "citus_coordinator1" pg_isready -U postgres > /dev/null 2>&1; then
+        echo -e "${RED}Cluster não está rodando!${NC}"
         echo
         echo "Pressione Enter para voltar..."
         read -r
         return
     fi
     
-    echo -e "${CYAN}📈 Distribuição de Shards:${NC}"
-    docker exec -i "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME" -c "
+    echo -e "${CYAN}Distribuição de Shards:${NC}"
+    docker exec -i "citus_coordinator1" psql -U postgres -d "$DB_NAME" -c "
     SELECT 
         n.nodename,
         n.nodeport,
@@ -411,8 +393,8 @@ cluster_monitor() {
     "
     
     echo
-    echo -e "${CYAN}🔍 Tamanho das Tabelas:${NC}"
-    docker exec -i "adtech_coordinator_primary" psql -U postgres -d "$DB_NAME" -c "
+    echo -e "${CYAN}Tamanho das Tabelas:${NC}"
+    docker exec -i "citus_coordinator1" psql -U postgres -d "$DB_NAME" -c "
     SELECT 
         schemaname, 
         tablename, 
@@ -423,10 +405,10 @@ cluster_monitor() {
     "
     
     echo
-    echo -e "${CYAN}📊 Links de Monitoramento:${NC}"
-    echo "• Grafana: http://localhost:3000"
-    echo "• Prometheus: http://localhost:9090"
-    echo "• Postgres Metrics: http://localhost:9187/metrics"
+    echo -e "${CYAN}Links de Monitoramento:${NC}"
+    echo "- Grafana: http://localhost:3000"
+    echo "- Prometheus: http://localhost:9090"
+    echo "- Postgres Metrics: http://localhost:9187/metrics"
     echo
     echo "Pressione Enter para voltar..."
     read -r
@@ -435,27 +417,27 @@ cluster_monitor() {
 # Função para cleanup
 cleanup_environment() {
     clear_screen
-    echo -e "${PURPLE}🧹 LIMPEZA DO AMBIENTE${NC}"
-    echo "═══════════════════════"
+    echo -e "${PURPLE}LIMPEZA DO AMBIENTE${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     echo
     
-    echo -e "${YELLOW}⚠️  Esta operação irá:${NC}"
-    echo "• Parar todos os containers"
-    echo "• Remover volumes de dados"
-    echo "• Limpar configurações"
+    echo -e "${YELLOW}ATENÇÃO: Esta operação irá:${NC}"
+    echo "- Parar todos os containers"
+    echo "- Remover volumes de dados"
+    echo "- Limpar configurações"
     echo
     echo -n "Deseja continuar? [y/N]: "
     read -r confirm
     
     if [[ $confirm =~ ^[Yy]$ ]]; then
         echo
-        echo -e "${CYAN}🛑 Parando containers...${NC}"
+        echo -e "${CYAN}Parando containers...${NC}"
         docker-compose -f docker-compose-patroni.yml down -v 2>/dev/null || true
         
-        echo -e "${CYAN}🧹 Limpando volumes órfãos...${NC}"
+        echo -e "${CYAN}Limpando volumes órfãos...${NC}"
         docker volume prune -f
         
-        echo -e "${GREEN}✅ Ambiente limpo!${NC}"
+        echo -e "${GREEN}Ambiente limpo com sucesso!${NC}"
     else
         echo -e "${YELLOW}Operação cancelada.${NC}"
     fi
@@ -504,15 +486,15 @@ main() {
         
         case $choice in
             1)
-                echo -e "${CYAN}️ Executando Simple Setup...${NC}"
+                echo -e "${CYAN}Executando Simple Setup...${NC}"
                 ./02_simple_setup.sh
                 ;;
             2)
-                echo -e "${CYAN}🔍 Executando Query Experiments...${NC}"
+                echo -e "${CYAN}Executando Query Experiments...${NC}"
                 ./03_query_experiments.sh
                 ;;
             3)
-                echo -e "${CYAN}️ Executando HA & Failover...${NC}"
+                echo -e "${CYAN}Executando HA & Failover...${NC}"
                 ./06_ha_failover.sh
                 ;;
             4)
@@ -531,12 +513,12 @@ main() {
                 clear
                 ;;
             q|Q|quit|exit)
-                echo -e "${GREEN}👋 Obrigado por usar o laboratório!${NC}"
-                echo -e "${CYAN}Boa sorte com seu TCC! 🎓${NC}"
+                echo -e "${GREEN}Obrigado por usar o laboratório!${NC}"
+                echo -e "${CYAN}Trabalho de Conclusão de Curso finalizado.${NC}"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}❌ Opção inválida!${NC}"
+                echo -e "${RED}Opção inválida. Tente novamente.${NC}"
                 sleep 1
                 ;;
         esac
@@ -545,8 +527,8 @@ main() {
 
 # Verificar se está no diretório correto
 if [[ ! -f "docker-compose-patroni.yml" ]]; then
-    echo -e "${RED}❌ Execute este script do diretório citus!${NC}"
-    echo -e "${YELLOW}💡 Certifique-se que o arquivo docker-compose-patroni.yml existe${NC}"
+    echo -e "${RED}ERRO: Execute este script do diretório citus${NC}"
+    echo -e "${YELLOW}Certifique-se que o arquivo docker-compose-patroni.yml existe${NC}"
     exit 1
 fi
 
