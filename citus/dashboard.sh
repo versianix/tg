@@ -2,7 +2,13 @@
 
 # ██████╗  █████╗ ███████╗██╗  ██╗██████╗  ██████╗  █████╗ ██████╗ ██╗██████╗ 
 # ██╔══██╗██╔══██╗██╔════╝██║  ██║██╔══██╗██╔═══██╗██╔══██╗██╔══██╗██║██╔══██╗
-# ██║  ██║███████║███████╗███████║██████╔╝██║   ██║███████║██████╔╝██║██║  ██║
+# ██║  ██║███████║███████╗███████║██████╔╝██║     echo -e "${BLUE}🎯 MÓDULOS DISPONÍVEIS${NC}"
+    echo "════════════════════="
+    echo
+    echo -e "${YELLOW}1.${NC} 🛠️  Simple Setup         - ${CYAN}Configurar cluster (Apple Silicon)${NC}"
+    echo -e "${YELLOW}2.${NC} 🔍 Query Experiments    - ${CYAN}Testar consultas distribuídas${NC}"
+    echo -e "${YELLOW}3.${NC} 🛡️  HA & Failover        - ${CYAN}Alta disponibilidade e recuperação${NC}"
+    echo -e "${YELLOW}4.${NC} 🏗️  Schema Manager       - ${CYAN}Criar schemas personalizados${NC}"████║██████╔╝██║██║  ██║
 # ██║  ██║██╔══██║╚════██║██╔══██║██╔══██╗██║   ██║██╔══██║██╔══██╗██║██║  ██║
 # ██████╔╝██║  ██║███████║██║  ██║██████╔╝╚██████╔╝██║  ██║██║  ██║██║██████╔╝
 # ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═════╝ 
@@ -221,20 +227,18 @@ show_menu() {
     echo -e "${YELLOW}1.${NC} 🔥 Crisis Simulator     - ${CYAN}Por que precisamos de sharding?${NC}"
     echo -e "${YELLOW}2.${NC} 🛠️  Simple Setup         - ${CYAN}Configurar cluster (Apple Silicon)${NC}"
     echo -e "${YELLOW}3.${NC} 🔍 Query Experiments    - ${CYAN}Testar consultas distribuídas${NC}"
-    echo -e "${YELLOW}4.${NC} 📈 Scaling Demo         - ${CYAN}Ver rebalanceamento em ação${NC}"
-    echo -e "${YELLOW}5.${NC} 🎓 Advanced Features    - ${CYAN}Recursos para produção${NC}"
-    echo -e "${YELLOW}6.${NC} 🛡️  HA & Failover        - ${CYAN}Alta disponibilidade e recuperação${NC}"
-    echo -e "${YELLOW}7.${NC} 🏗️  Schema Manager       - ${CYAN}Criar schemas personalizados${NC}"
+    echo -e "${YELLOW}4.${NC} ️  HA & Failover        - ${CYAN}Alta disponibilidade e recuperação${NC}"
+    echo -e "${YELLOW}5.${NC} 🏗️  Schema Manager       - ${CYAN}Criar schemas personalizados${NC}"
     echo
     echo -e "${PURPLE}Utilitários:${NC}"
-    echo -e "${YELLOW}8.${NC} 💻 SQL Console          - ${CYAN}Conectar diretamente ao cluster${NC}"
-    echo -e "${YELLOW}9.${NC} 📊 Cluster Monitor      - ${CYAN}Visualizar métricas em tempo real${NC}"
+    echo -e "${YELLOW}5.${NC} 💻 SQL Console          - ${CYAN}Conectar diretamente ao cluster${NC}"
+    echo -e "${YELLOW}6.${NC} 📊 Cluster Monitor      - ${CYAN}Visualizar métricas em tempo real${NC}"
     echo -e "${YELLOW}0.${NC} 🧹 Cleanup             - ${CYAN}Parar e limpar ambiente${NC}"
     echo
     echo
     echo -e "${RED}q.${NC} 🚪 Sair"
     echo
-    echo -n -e "${CYAN}Escolha uma opção [0-9,q]: ${NC}"
+    echo -n -e "${CYAN}Escolha uma opção [0-6,q]: ${NC}"
 }
 
 # Função para Schema Manager
@@ -468,13 +472,10 @@ show_help() {
     echo "═══════════════════════"
     echo
     echo -e "${CYAN}📚 Ordem Recomendada:${NC}"
-    echo "1. Crisis Simulator - Entenda o problema"
-    echo "2. Simple Setup - Configure o ambiente (ou use Schema Manager)"
-    echo "3. Schema Manager - Crie schemas personalizados"
-    echo "4. Query Experiments - Teste consultas"
-    echo "5. Scaling Demo - Veja scaling em ação"
-    echo "6. Advanced Features - Recursos avançados"
-    echo "7. HA & Failover - Alta disponibilidade"
+    echo "1. Simple Setup - Configure o ambiente (ou use Schema Manager)"
+    echo "2. Schema Manager - Crie schemas personalizados"
+    echo "3. Query Experiments - Teste consultas"
+    echo "4. HA & Failover - Alta disponibilidade"
     echo
     echo -e "${CYAN}🛠️  Pré-requisitos:${NC}"
     echo "• Docker & Docker Compose instalados"
@@ -503,37 +504,25 @@ main() {
         
         case $choice in
             1)
-                echo -e "${CYAN}🔥 Executando Crisis Simulator...${NC}"
-                ./01_crisis_simulator.sh
-                ;;
-            2)
-                echo -e "${CYAN}🛠️ Executando Simple Setup...${NC}"
+                echo -e "${CYAN}️ Executando Simple Setup...${NC}"
                 ./02_simple_setup.sh
                 ;;
-            3)
+            2)
                 echo -e "${CYAN}🔍 Executando Query Experiments...${NC}"
                 ./03_query_experiments.sh
                 ;;
-            4)
-                echo -e "${CYAN}📈 Executando Scaling Demo...${NC}"
-                ./04_scaling_demo.sh
-                ;;
-            5)
-                echo -e "${CYAN}🎓 Executando Advanced Features...${NC}"
-                ./05_advanced_features.sh
-                ;;
-            6)
-                echo -e "${CYAN}🛡️ Executando HA & Failover...${NC}"
+            3)
+                echo -e "${CYAN}️ Executando HA & Failover...${NC}"
                 ./06_ha_failover.sh
                 ;;
-            7)
+            4)
                 schema_manager_menu
                 ;;
-            8)
+            5)
                 sql_console
                 clear
                 ;;
-            9)
+            6)
                 cluster_monitor
                 clear
                 ;;
