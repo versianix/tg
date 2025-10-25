@@ -64,7 +64,7 @@ services:
       
       # Citus Configuration
       PATRONI_SCOPE: citus-cluster
-      PATRONI_CITUS_DATABASE: citus
+      PATRONI_CITUS_DATABASE: citus_platform
       
       # PostgreSQL Configuration
       POSTGRES_PASSWORD: postgres
