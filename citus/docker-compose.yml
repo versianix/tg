@@ -1,27 +1,24 @@
-# Docker Compose para Cluster Citus com HA Simplificado
-# TCC: Bancos de Dados Distribuídos - Versão Educacional
+# Docker Compose para Cluster Citus Simples
+# TCC: Bancos de Dados Distribuídos - Versão Educacional Mínima
 
 networks:
   citus_cluster:
-    name: citus_cluster_ha
+    name: citus_cluster_simple
     driver: bridge
 
 volumes:
   citus_coordinator_data:
-  citus_coordinator_standby_data:
-  citus_worker1a_data:
-  citus_worker1b_data:
-  citus_worker2a_data:
-  citus_worker2b_data:
+  citus_worker1_data:
+  citus_worker2_data:
   citus_grafana_data:
 services:
   # ═══════════════════════════════════════════════════════════════
-  # 🎯 COORDINATOR PRIMARY - Nó coordenador principal
+  # 🎯 COORDINATOR - Nó coordenador único
   # ═══════════════════════════════════════════════════════════════
-  coordinator-primary:
+  coordinator:
     image: "citusdata/citus:12.1"
-    container_name: "citus_coordinator_primary"
-    hostname: coordinator-primary
+    container_name: "citus_coordinator"
+    hostname: coordinator
     platform: linux/amd64
     networks:
       - citus_cluster
@@ -38,7 +35,7 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust
     labels:
       - "com.citusdata.role=Coordinator"
-      - "com.citusdata.cluster=citus_ha"
+      - "com.citusdata.cluster=citus_simple"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d citus_platform"]
       interval: 10s
@@ -46,47 +43,23 @@ services:
       retries: 5
 
   # ═══════════════════════════════════════════════════════════════
-  # 🔄 COORDINATOR STANDBY - Backup do coordenador
+  # 🔧 WORKER 1 - Primeiro nó de dados
   # ═══════════════════════════════════════════════════════════════
-  coordinator-standby:
+  worker1:
     image: "citusdata/citus:12.1"
-    container_name: "citus_coordinator_standby"
-    hostname: coordinator-standby
-    platform: linux/amd64
-    networks:
-      - citus_cluster
-    ports: 
-      - "5434:5432"
-    volumes:
-      - citus_coordinator_standby_data:/var/lib/postgresql/data
-    environment: 
-      <<: *auth
-      POSTGRES_INITDB_ARGS: "--auth-host=trust"
-    labels:
-      - "com.citusdata.role=Coordinator-Standby"
-      - "com.citusdata.cluster=citus_ha"
-    depends_on:
-      coordinator-primary:
-        condition: service_healthy
-
-  # ═══════════════════════════════════════════════════════════════
-  # 🔧 WORKER GROUP 1 PRIMARY - Nó de dados principal grupo 1
-  # ═══════════════════════════════════════════════════════════════
-  worker1-primary:
-    image: "citusdata/citus:12.1"
-    container_name: "citus_worker_1a"
+    container_name: "citus_worker1"
     hostname: worker1
     platform: linux/amd64
     networks:
       - citus_cluster
     ports:
-      - "5435:5432"
+      - "5433:5432"
     volumes:
-      - citus_worker1a_data:/var/lib/postgresql/data
+      - citus_worker1_data:/var/lib/postgresql/data
     environment: *auth
     labels:
-      - "com.citusdata.role=Worker-Primary"
-      - "com.citusdata.cluster=citus_ha"
+      - "com.citusdata.role=Worker"
+      - "com.citusdata.cluster=citus_simple"
       - "com.citusdata.group=1"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d citus_platform"]
@@ -94,52 +67,27 @@ services:
       timeout: 5s
       retries: 5
     depends_on:
-      coordinator-primary:
+      coordinator:
         condition: service_healthy
 
   # ═══════════════════════════════════════════════════════════════
-  # 🔄 WORKER GROUP 1 STANDBY - Backup do worker grupo 1
+  # 🔧 WORKER 2 - Segundo nó de dados
   # ═══════════════════════════════════════════════════════════════
-  worker1-standby:
+  worker2:
     image: "citusdata/citus:12.1"
-    container_name: "citus_worker_1b"
-    hostname: worker1-standby
-    platform: linux/amd64
-    networks:
-      - citus_cluster
-    ports:
-      - "5436:5432"
-    volumes:
-      - citus_worker1b_data:/var/lib/postgresql/data
-    environment: 
-      <<: *auth
-      POSTGRES_INITDB_ARGS: "--auth-host=trust"
-    labels:
-      - "com.citusdata.role=Worker-Standby"
-      - "com.citusdata.cluster=citus_ha"
-      - "com.citusdata.group=1"
-    depends_on:
-      worker1-primary:
-        condition: service_healthy
-
-  # ═══════════════════════════════════════════════════════════════
-  # 🔧 WORKER GROUP 2 PRIMARY - Nó de dados principal grupo 2  
-  # ═══════════════════════════════════════════════════════════════
-  worker2-primary:
-    image: "citusdata/citus:12.1"
-    container_name: "citus_worker_2a"
+    container_name: "citus_worker2"
     hostname: worker2
     platform: linux/amd64
     networks:
       - citus_cluster
     ports:
-      - "5437:5432"
+      - "5434:5432"
     volumes:
-      - citus_worker2a_data:/var/lib/postgresql/data
+      - citus_worker2_data:/var/lib/postgresql/data
     environment: *auth
     labels:
-      - "com.citusdata.role=Worker-Primary"
-      - "com.citusdata.cluster=citus_ha"
+      - "com.citusdata.role=Worker"
+      - "com.citusdata.cluster=citus_simple"
       - "com.citusdata.group=2"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d citus_platform"]
@@ -147,78 +95,8 @@ services:
       timeout: 5s
       retries: 5
     depends_on:
-      coordinator-primary:
+      coordinator:
         condition: service_healthy
-
-  # ═══════════════════════════════════════════════════════════════
-  # 🔄 WORKER GROUP 2 STANDBY - Backup do worker grupo 2
-  # ═══════════════════════════════════════════════════════════════
-  worker2-standby:
-    image: "citusdata/citus:12.1"
-    container_name: "citus_worker_2b"
-    hostname: worker2-standby
-    platform: linux/amd64
-    networks:
-      - citus_cluster
-    ports:
-      - "5438:5432"
-    volumes:
-      - citus_worker2b_data:/var/lib/postgresql/data
-      - ./scripts/setup_replica_worker2b.sh:/docker-entrypoint-initdb.d/setup_replica.sh:ro
-    environment: 
-      <<: *auth
-      POSTGRES_INITDB_ARGS: "--auth-host=trust"
-      PGUSER_REPLICA: "replicator"
-      PGPASSWORD_REPLICA: "replicator_pass"
-      PRIMARY_HOST: "worker2"
-    labels:
-      - "com.citusdata.role=Worker-Standby"
-      - "com.citusdata.cluster=citus_ha"
-      - "com.citusdata.group=2"
-    depends_on:
-      worker2-primary:
-        condition: service_healthy
-
-  # ═══════════════════════════════════════════════════════════════
-  # 🔄 HAPROXY - Load Balancer para failover automático dos workers
-  # ═══════════════════════════════════════════════════════════════
-  haproxy-worker1:
-    image: haproxy:2.8
-    container_name: "citus_haproxy_worker1"
-    hostname: worker1-lb
-    platform: linux/amd64
-    networks:
-      - citus_cluster
-    ports:
-      - "5440:5432"  # Porta externa para worker1 group
-    volumes:
-      - ./haproxy-worker1.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-    depends_on:
-      - worker1-primary
-      - worker1-standby
-    labels:
-      - "com.citusdata.role=LoadBalancer"
-      - "com.citusdata.group=1"
-
-  haproxy-worker2:
-    image: haproxy:2.8
-    container_name: "citus_haproxy_worker2"
-    hostname: worker2-lb
-    platform: linux/amd64
-    networks:
-      - citus_cluster
-    ports:
-      - "5441:5432"  # Porta externa para worker2 group
-    volumes:
-      - ./haproxy-worker2.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-    depends_on:
-      - worker2-primary
-      - worker2-standby
-    labels:
-      - "com.citusdata.role=LoadBalancer"
-      - "com.citusdata.group=2"
-
-  # 🚀 CLUSTER SETUP removido - configuração manual via scripts/simple_setup.sh
 
   # ═══════════════════════════════════════════════════════════════
   # 📊 MONITORING - Prometheus para métricas
@@ -232,9 +110,9 @@ services:
     ports:
       - "9187:9187"
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:postgres@coordinator-primary:5432/citus_platform?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres@coordinator:5432/citus_platform?sslmode=disable"
     depends_on:
-      coordinator-primary:
+      coordinator:
         condition: service_healthy
 
   # ═══════════════════════════════════════════════════════════════
