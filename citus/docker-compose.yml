@@ -1,5 +1,4 @@
-# Docker Compose para Cluster Citus Simples
-# TCC: Bancos de Dados Distribuídos - Versão Educacional Mínima
+# Docker Compose for a simple Citus cluster with monitoring and observability
 
 networks:
   citus_cluster:
@@ -13,7 +12,7 @@ volumes:
   citus_grafana_data:
 services:
   # ═══════════════════════════════════════════════════════════════
-  # 🎯 COORDINATOR - Nó coordenador único
+  # COORDINATOR 
   # ═══════════════════════════════════════════════════════════════
   coordinator:
     image: "citusdata/citus:12.1"
@@ -43,7 +42,7 @@ services:
       retries: 5
 
   # ═══════════════════════════════════════════════════════════════
-  # 🔧 WORKER 1 - Primeiro nó de dados
+  # 🔧 WORKER 1 
   # ═══════════════════════════════════════════════════════════════
   worker1:
     image: "citusdata/citus:12.1"
@@ -71,7 +70,7 @@ services:
         condition: service_healthy
 
   # ═══════════════════════════════════════════════════════════════
-  # 🔧 WORKER 2 - Segundo nó de dados
+  # WORKER 2 
   # ═══════════════════════════════════════════════════════════════
   worker2:
     image: "citusdata/citus:12.1"
@@ -99,7 +98,7 @@ services:
         condition: service_healthy
 
   # ═══════════════════════════════════════════════════════════════
-  # 📊 MONITORING - Prometheus para métricas
+  # MONITORING - Prometheus
   # ═══════════════════════════════════════════════════════════════
   postgres-exporter:
     image: "prometheuscommunity/postgres-exporter:latest"
@@ -148,26 +147,3 @@ services:
       - GF_USERS_DEFAULT_THEME=dark
     depends_on:
       - prometheus
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 📝 COMANDOS ÚTEIS:
-# ═══════════════════════════════════════════════════════════════════════════════
-# 
-# 🚀 Iniciar cluster:
-#   docker compose up -d
-#
-# 🔍 Ver status:
-#   docker compose ps
-#
-# 🎯 Conectar ao coordinator:
-#   docker exec -it citus_coordinator_primary psql -U postgres -d citus_platform
-#
-# 🔧 Conectar ao worker:
-#   docker exec -it citus_worker_1a psql -U postgres -d citus_platform
-#
-# 📊 Ver workers ativos:
-#   docker exec -it citus_coordinator_primary psql -U postgres -d citus_platform -c "SELECT * FROM citus_get_active_worker_nodes();"
-#
-# 🧹 Limpar tudo:
-#   docker compose down -v
-# ═══════════════════════════════════════════════════════════════════════════════

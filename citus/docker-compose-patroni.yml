@@ -1,6 +1,6 @@
-# Docker Compose para Citus + Patroni seguindo arquitetura oficial
-# Baseado em: https://www.citusdata.com/blog/2023/03/06/patroni-3-0-and-citus-scalable-ha-postgres/
-# Fonte: https://github.com/zalando/patroni/blob/master/docker-compose-citus.yml
+# Docker Compose for Citus + Patroni following the official architecture
+# Based on: https://www.citusdata.com/blog/2023/03/06/patroni-3-0-and-citus-scalable-ha-postgres/
+# Source: https://github.com/zalando/patroni/blob/master/docker-compose-citus.yml
 
 version: "3.8"
 
@@ -10,7 +10,7 @@ networks:
 
 services:
   # ============================================================================
-  # ETCD CLUSTER (3 nodes para consenso via Raft)
+  # ETCD CLUSTER (3 nodes for Raft consensus)
   # ============================================================================
   etcd1: &etcd_base
     image: quay.io/coreos/etcd:v3.5.10
@@ -46,7 +46,7 @@ services:
       - etcd3_data:/etcd-data
 
   # ============================================================================
-  # HAPROXY (apenas para acesso externo ao coordinator)
+  # HAPROXY (for external access to coordinator if needed)
   # ============================================================================
   haproxy:
     image: citus-patroni:latest
@@ -211,7 +211,7 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # MONITORING & OBSERVABILITY (reutilizando dashboard existente)
+  # MONITORING & OBSERVABILITY
   # ============================================================================
   postgres_exporter_patroni:
     image: prometheuscommunity/postgres-exporter:latest
