@@ -29,6 +29,7 @@ DATA_DIR="$CONFIG_DIR/data"
 CSV_DIR="$CONFIG_DIR/csv"
 SCENARIOS_DIR="$CONFIG_DIR/scenarios"
 COORDINATOR_CONTAINER=""  # Será detectado dinamicamente
+DATABASE_NAME=""  # Será detectado dinamicamente (citus_platform ou citus)
 
 # Função para logs formatados
 log() {
@@ -45,9 +46,40 @@ log() {
     esac
 }
 
+# Função para detectar arquitetura ativa
+detect_architecture() {
+    # Verifica se há containers Patroni rodando
+    if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator1$"; then
+        echo "patroni"
+    # Verifica se há container simples rodando
+    elif docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
+        echo "simple"
+    else
+        echo "none"
+    fi
+}
+
+# Função para detectar coordinator baseado na arquitetura
+detect_coordinator() {
+    local arch=$(detect_architecture)
+    
+    case $arch in
+        "patroni")
+            detect_patroni_leader
+            ;;
+        "simple")
+            detect_simple_coordinator
+            ;;
+        *)
+            log "ERROR" "Nenhuma arquitetura Citus detectada"
+            return 1
+            ;;
+    esac
+}
+
 # Função para detectar coordinator líder via API do Patroni
-detect_leader_coordinator() {
-    log "INFO" "Detectando coordinator líder..."
+detect_patroni_leader() {
+    log "INFO" "Detectando coordinator líder (Patroni)..."
     
     # Tenta cada coordinator diretamente
     for coord in coordinator1 coordinator2 coordinator3; do
@@ -65,7 +97,7 @@ detect_leader_coordinator() {
         
         if [ -n "$leader" ]; then
             COORDINATOR_CONTAINER="citus_$leader"
-            log "SUCCESS" "Líder detectado: $leader"
+            log "SUCCESS" "Coordinator líder detectado: $leader"
             return 0
         fi
     done
@@ -73,6 +105,20 @@ detect_leader_coordinator() {
     log "WARNING" "Não foi possível detectar líder. Usando coordinator1 (fallback)"
     COORDINATOR_CONTAINER="citus_coordinator1"
     return 1
+}
+
+# Função para detectar coordinator simples
+detect_simple_coordinator() {
+    log "INFO" "Detectando coordinator (Arquitetura Simples)..."
+    
+    if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
+        COORDINATOR_CONTAINER="citus_coordinator"
+        log "SUCCESS" "Coordinator detectado: citus_coordinator"
+        return 0
+    else
+        log "ERROR" "Container citus_coordinator não encontrado"
+        return 1
+    fi
 }
 
 # Função para verificar dependências
@@ -102,14 +148,19 @@ check_cluster() {
     log "INFO" "Verificando se cluster Citus está rodando..."
     
     # Detectar coordinator líder
-    detect_leader_coordinator || return 1
+    detect_coordinator || return 1
     
-    if ! docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "SELECT 1;" &> /dev/null; then
-        log "ERROR" "Cluster Citus HA não está acessível"
+    # Verificar conectividade - primeiro tentar citus_platform, depois citus
+    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus_platform -c "SELECT 1;" &> /dev/null; then
+        DATABASE_NAME="citus_platform"
+    elif docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "SELECT 1;" &> /dev/null; then
+        DATABASE_NAME="citus"
+    else
+        log "ERROR" "Não é possível conectar ao cluster Citus"
         exit 1
     fi
     
-    log "SUCCESS" "Cluster Citus está rodando"
+    log "SUCCESS" "Cluster Citus está rodando (database: $DATABASE_NAME)"
 }
 
 # Função para listar tabelas disponíveis
@@ -194,16 +245,16 @@ load_table_data() {
     
     # Limpar dados existentes para evitar conflitos
     log "INFO" "Limpando dados existentes da tabela '$table_name'..."
-    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "TRUNCATE TABLE $table_name CASCADE;" 2>/dev/null || true
+    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DATABASE_NAME" -c "TRUNCATE TABLE $table_name CASCADE;" 2>/dev/null || true
     
     # Executa COPY para carregar os dados
     local copy_command="\\COPY $table_name FROM '/tmp/${table_name}.csv' WITH (FORMAT csv, HEADER true);"
     
-    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "$copy_command"; then
+    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DATABASE_NAME" -c "$copy_command"; then
         log "SUCCESS" "Dados carregados com sucesso para tabela '$table_name'"
         
         # Mostra estatísticas
-        local count=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -t -c "SELECT COUNT(*) FROM $table_name;" | xargs)
+        local count=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DATABASE_NAME" -t -c "SELECT COUNT(*) FROM $table_name;" | xargs)
         log "INFO" "Total de registros na tabela '$table_name': $count"
         
         # Remove arquivo temporário
@@ -216,41 +267,63 @@ load_table_data() {
     fi
 }
 
-# Função para carregar dados de todas as tabelas
+# Função para carregar dados de todas as tabelas com CSVs disponíveis
 load_all_data() {
-    log "INFO" "Iniciando carregamento de dados de todas as tabelas..."
-    echo
+    check_dependencies
+    check_cluster
     
-    # Verificar se diretório CSV existe
+    log "INFO" "🚀 Carregando dados de todas as tabelas disponíveis..."
+    
+    # Lista arquivos CSV disponíveis
     if [[ ! -d "$CSV_DIR" ]]; then
-        log "ERROR" "Diretório CSV não encontrado: $CSV_DIR"
-        log "INFO" "Crie o diretório e adicione arquivos CSV:"
-        log "INFO" "  mkdir -p $CSV_DIR"
-        log "INFO" "  # Adicione seus arquivos: companies.csv, campaigns.csv, etc."
+        log "WARNING" "Diretório CSV não encontrado: $CSV_DIR"
         return 1
     fi
     
-    local success_count=0
-    local error_count=0
-    
-    # Obtém lista de tabelas e processa uma por vez
-    local tables=$(yq eval '.tables | keys' config/tables.yml | grep '^-' | sed 's/^- //')
-    
-    for table in $tables; do
-        if check_csv_exists "$table"; then
-            if load_table_data "$table"; then
-                ((success_count++))
-            else
-                ((error_count++))
-            fi
-        else
-            log "WARNING" "CSV não encontrado para tabela '$table' (esperado: $CSV_DIR/${table}.csv)"
-            ((error_count++))
+    # Para cada CSV encontrado, tenta carregar na tabela correspondente
+    for csv_file in "$CSV_DIR"/*.csv; do
+        if [[ -f "$csv_file" ]]; then
+            local table_name=$(basename "$csv_file" .csv)
+            log "INFO" "Processando tabela: $table_name"
+            load_table_data "$table_name"
         fi
-        echo
     done
     
-    log "INFO" "Carregamento concluído: $success_count sucessos, $error_count erros"
+    log "SUCCESS" "🎉 Carregamento completo finalizado!"
+}
+
+# Função para carregar dados de um cenário específico
+load_scenario_data() {
+    local scenario="$1"
+    
+    check_dependencies
+    check_cluster
+    
+    log "INFO" "🚀 Carregando dados do cenário: $scenario"
+    
+    # Lista arquivos CSV disponíveis
+    if [[ ! -d "$CSV_DIR" ]]; then
+        log "WARNING" "Diretório CSV não encontrado: $CSV_DIR"
+        return 1
+    fi
+    
+    # Para cada CSV encontrado, tenta carregar na tabela correspondente
+    local loaded_count=0
+    for csv_file in "$CSV_DIR"/*.csv; do
+        if [[ -f "$csv_file" ]]; then
+            local table_name=$(basename "$csv_file" .csv)
+            log "INFO" "Processando tabela: $table_name"
+            if load_table_data "$table_name"; then
+                loaded_count=$((loaded_count + 1))
+            fi
+        fi
+    done
+    
+    if [ $loaded_count -gt 0 ]; then
+        log "SUCCESS" "🎉 Carregamento do cenário '$scenario' finalizado! ($loaded_count tabelas carregadas)"
+    else
+        log "WARNING" "Nenhuma tabela foi carregada para o cenário '$scenario'"
+    fi
 }
 
 # Função para listar arquivos CSV disponíveis
@@ -433,6 +506,15 @@ main() {
                 load_table_data "$2"
             else
                 log "ERROR" "Nome da tabela é obrigatório"
+                exit 1
+            fi
+            ;;
+        "load")
+            # Compatibilidade com dashboard - carrega dados do cenário
+            if [[ -n "${2:-}" ]]; then
+                load_scenario_data "$2"
+            else
+                log "ERROR" "Nome do cenário é obrigatório"
                 exit 1
             fi
             ;;
