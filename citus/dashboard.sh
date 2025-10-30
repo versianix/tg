@@ -141,18 +141,23 @@ $etcd3_status"
     echo
     echo -e "${BLUE}Coordinators (High Availability with Patroni):${NC}"
     
-    # Check which one is the leader
+    # Check which one is the leader using Patroni API
     coord1_role="REPLICA"
     coord2_role="REPLICA"
     coord3_role="REPLICA"
     
-    if docker logs citus_coordinator1 --tail 1 2>/dev/null | grep -q "leader with the lock"; then
+    # Check coordinator1
+    if docker exec citus_coordinator1 curl -s localhost:8008/ 2>/dev/null | grep -q '"role": "master"'; then
         coord1_role="LEADER"
     fi
-    if docker logs citus_coordinator2 --tail 1 2>/dev/null | grep -q "leader with the lock"; then
+    
+    # Check coordinator2  
+    if docker exec citus_coordinator2 curl -s localhost:8008/ 2>/dev/null | grep -q '"role": "master"'; then
         coord2_role="LEADER"
     fi
-    if docker logs citus_coordinator3 --tail 1 2>/dev/null | grep -q "leader with the lock"; then
+    
+    # Check coordinator3
+    if docker exec citus_coordinator3 curl -s localhost:8008/ 2>/dev/null | grep -q '"role": "master"'; then
         coord3_role="LEADER"
     fi
     
