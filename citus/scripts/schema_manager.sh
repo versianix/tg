@@ -44,33 +44,95 @@ log() {
     esac
 }
 
+# Função para detectar arquitetura ativa
+detect_architecture() {
+    # Verifica se há containers Patroni rodando
+    if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator1$"; then
+        echo "patroni"
+    # Verifica se há container simples rodando
+    elif docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
+        echo "simple"
+    else
+        echo "none"
+    fi
+}
+
+# Função para detectar coordinator baseado na arquitetura
+detect_coordinator() {
+    local arch=$(detect_architecture)
+    
+    case $arch in
+        "patroni")
+            detect_patroni_leader
+            ;;
+        "simple")
+            detect_simple_coordinator
+            ;;
+        *)
+            log "ERROR" "Nenhuma arquitetura Citus detectada"
+            return 1
+            ;;
+    esac
+}
+
 # Função para detectar coordinator líder via API do Patroni
-detect_leader_coordinator() {
-    log "INFO" "Detectando coordinator líder..."
+detect_patroni_leader() {
+    log "INFO" "Detectando coordinator líder (Patroni)..."
     
-    # Tenta cada coordinator diretamente
-    for coord in coordinator1 coordinator2 coordinator3; do
-        container_name="citus_$coord"
+    # Try to detect leader for up to 1 minute 
+    local max_attempts=120  # 60 seconds (120 * 0.5s)
+    local attempt=0
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # Check for leader using multiple methods
+        for coord in coordinator1 coordinator2 coordinator3; do
+            container_name="citus_$coord"
+
+            # Check if the container is running
+            if ! docker ps --format "table {{.Names}}" | grep -q "^$container_name$"; then
+                continue
+            fi
+
+            # Method 1: Check Patroni API for master role
+            role=$(docker exec "$container_name" curl -s localhost:8008/ 2>/dev/null | grep -o '"role":"[^"]*"' | cut -d'"' -f4 2>/dev/null || echo "")
+            if [[ "$role" == "master" ]]; then
+                COORDINATOR_CONTAINER="$container_name"
+                log "SUCCESS" "Coordinator líder detectado: $coord"
+                return 0
+            fi
+            
+            # Method 2: Direct PostgreSQL check for master/replica status
+            if docker exec "$container_name" pg_isready -U postgres >/dev/null 2>&1; then
+                postgres_role=$(docker exec "$container_name" psql -U postgres -t -c "SELECT CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'master' END;" 2>/dev/null | tr -d ' ')
+                if [[ "$postgres_role" == "master" ]]; then
+                    COORDINATOR_CONTAINER="$container_name"
+                    log "SUCCESS" "Coordinator líder detectado: $coord"
+                    return 0
+                fi
+            fi
+        done
         
-        # Verifica se o container está rodando
-        if ! docker ps --format "table {{.Names}}" | grep -q "^$container_name$"; then
-            continue
-        fi
-        
-        # Usa API do Patroni para detectar líder
-        leader=$(docker exec "$container_name" curl -s --connect-timeout 2 localhost:8008/cluster 2>/dev/null | \
-                 grep -o '"name": "[^"]*", "role": "leader"' | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
-        
-        if [ -n "$leader" ]; then
-            COORDINATOR_CONTAINER="citus_$leader"
-            log "SUCCESS" "Líder detectado: $leader"
-            return 0
-        fi
+        sleep 0.5
+        attempt=$((attempt + 1))
     done
-    
+
     log "WARNING" "Não foi possível detectar líder. Usando coordinator1 (fallback)"
     COORDINATOR_CONTAINER="citus_coordinator1"
     return 1
+}
+
+# Função para detectar coordinator simples
+detect_simple_coordinator() {
+    log "INFO" "Detectando coordinator (Arquitetura Simples)..."
+    
+    if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
+        COORDINATOR_CONTAINER="citus_coordinator"
+        log "SUCCESS" "Coordinator detectado: citus_coordinator"
+        return 0
+    else
+        log "ERROR" "Container citus_coordinator não encontrado"
+        return 1
+    fi
 }
 
 # Função para verificar dependências
@@ -96,8 +158,8 @@ check_dependencies() {
         return 1
     fi
     
-    # Detectar e verificar coordinator líder
-    detect_leader_coordinator || return 1
+    # Detectar e verificar coordinator baseado na arquitetura
+    detect_coordinator || return 1
     
     # Verificar se cluster está rodando
     if ! docker exec "$COORDINATOR_CONTAINER" pg_isready -U postgres > /dev/null 2>&1; then
