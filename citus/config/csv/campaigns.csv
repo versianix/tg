@@ -1,0 +1,6 @@
+id,company_id,name,budget,status,start_date,end_date,created_at
+1,1,"TechCorp - Brand Awareness Campaign",50000,"active","2024-02-01","2024-04-30","2024-01-20 09:00:00"
+2,1,"TechCorp - Product Launch",75000,"active","2024-03-01","2024-05-31","2024-01-21 10:30:00"
+3,2,"Marketing Solutions - Lead Generation",30000,"paused","2024-02-15","2024-04-15","2024-01-22 14:15:00"
+4,3,"DataAnalytics - Demo Campaign",25000,"active","2024-03-01","2024-06-01","2024-01-23 11:45:00"
+5,4,"CloudServices - Enterprise Push",100000,"active","2024-04-01","2024-07-31","2024-01-24 16:20:00"

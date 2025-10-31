@@ -1,0 +1,6 @@
+id,campaign_id,company_id,title,content,impressions,clicks,cost,created_at
+1,1,1,"Inovação Tecnológica","Descubra as mais recentes inovações em tech",15000,450,1200.50,"2024-02-02 08:30:00"
+2,1,1,"Soluções Empresariais","Transforme seu negócio com nossas soluções",12000,380,980.75,"2024-02-03 10:15:00"
+3,2,1,"Novo Produto Chegando","Prepare-se para o futuro da tecnologia",25000,750,2100.00,"2024-03-02 09:20:00"
+4,3,2,"Gere Mais Leads","Aumente suas conversões com marketing inteligente",8000,240,650.25,"2024-02-16 14:30:00"
+5,4,3,"Analytics Avançado","Dados que transformam decisões",18000,540,1450.80,"2024-03-02 11:40:00"
