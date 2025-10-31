@@ -1,0 +1,73 @@
+# Configuração Patroni para Citus
+# Baseado em: https://github.com/zalando/patroni/blob/master/postgres0.yml
+# Adaptado para uso educacional com Citus
+
+scope: citus-cluster
+namespace: /citus/
+name: ${PATRONI_NAME}
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: ${PATRONI_NAME}:8008
+
+etcd3:
+  hosts: ${PATRONI_ETCD3_HOSTS}
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      pg_hba:
+        - local all all trust
+        - host replication replicator 0.0.0.0/0 md5
+        - host all all 0.0.0.0/0 md5
+      parameters:
+        # Configurações para Citus
+        shared_preload_libraries: citus
+        max_connections: 100
+        shared_buffers: 128MB
+        effective_cache_size: 512MB
+        work_mem: 4MB
+        maintenance_work_mem: 64MB
+        
+        # Configurações de replicação
+        wal_level: replica
+        hot_standby: on
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_size: 512MB
+        
+        # Configurações Citus específicas
+        max_prepared_transactions: 200  # 2 * max_connections
+
+  initdb:
+    - encoding: UTF8
+    - locale: en_US.UTF-8
+    - data-checksums
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: ${PATRONI_NAME}:5432
+  data_dir: /home/postgres/data
+  authentication:
+    replication:
+      username: replicator
+      password: replicator-password
+    superuser:
+      username: postgres
+      password: ${POSTGRES_PASSWORD:-postgres}
+
+# Configuração específica do Citus
+citus:
+  database: ${PATRONI_CITUS_DATABASE:-citus}
+  group: ${PATRONI_CITUS_GROUP:-0}
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false
