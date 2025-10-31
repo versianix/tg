@@ -1,0 +1,44 @@
+# Configuração Prometheus para Patroni + Citus
+# Baseado na configuração existente, adaptada para arquitetura Patroni
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files: []
+
+scrape_configs:
+  # PostgreSQL métricas via postgres_exporter
+  - job_name: 'postgres-patroni'
+    static_configs:
+      - targets: ['postgres-exporter-patroni:9187']
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+  # Patroni REST API metrics (se disponível)
+  - job_name: 'patroni-api'
+    static_configs:
+      - targets: ['coordinator1:8008', 'coordinator2:8008', 'coordinator3:8008']
+      - targets: ['worker1-primary:8008', 'worker1-standby:8008']
+      - targets: ['worker2-primary:8008', 'worker2-standby:8008']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
+  # etcd metrics (se disponível)
+  - job_name: 'etcd'
+    static_configs:
+      - targets: ['etcd1:2379', 'etcd2:2379', 'etcd3:2379']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
+  # HAProxy stats (se configurado)
+  - job_name: 'haproxy'
+    static_configs:
+      - targets: ['haproxy:8404']
+    scrape_interval: 15s
+    metrics_path: /stats?stats;csv
+
+  # Self monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
