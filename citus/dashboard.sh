@@ -328,14 +328,13 @@ show_menu() {
     echo
     echo -e "${YELLOW}[1]${NC} Simple Setup (Basic)    - Configure simple cluster"
     echo -e "${YELLOW}[2]${NC} Simple Setup (Patroni)  - Configure cluster with Patroni + etcd"
-    echo -e "${YELLOW}[3]${NC} Query Experiments       - Test distributed queries"
-    echo -e "${YELLOW}[4]${NC} HA & Failover           - High availability and recovery"
-    echo -e "${YELLOW}[5]${NC} Schema Manager          - Create custom schemas"
+    echo -e "${YELLOW}[3]${NC} HA & Failover           - High availability and recovery"
+    echo -e "${YELLOW}[4]${NC} Schema Manager          - Create custom schemas"
     echo
     echo -e "${PURPLE}UTILITIES${NC}"
     echo "────────────────────────────────────────────────────────────────────────────────"
-    echo -e "${YELLOW}[6]${NC} SQL Console             - Connect directly to cluster"
-    echo -e "${YELLOW}[7]${NC} Cluster Monitor         - View real-time metrics"
+    echo -e "${YELLOW}[5]${NC} SQL Console             - Connect directly to cluster"
+    echo -e "${YELLOW}[6]${NC} Cluster Monitor         - View real-time metrics"
     echo -e "${YELLOW}[0]${NC} Cleanup                 - Stop and clean environment"
     echo
     echo -e "${RED}[q]${NC} Exit"
@@ -572,7 +571,7 @@ show_help() {
     echo -e "${CYAN}📚 Recommended Order:${NC}"
     echo "1. Simple Setup - Configure o ambiente (ou use Schema Manager)"
     echo "2. Schema Manager - Crie schemas personalizados"
-    echo "3. Query Experiments - Test queries"
+
     echo "4. HA & Failover - Alta disponibilidade"
     echo
     echo -e "${CYAN}🛠️  Prerequisites:${NC}"
@@ -664,21 +663,17 @@ main() {
                 ./02_simple_setup.sh
                 ;;
             3)
-                echo -e "${CYAN}Running Query Experiments...${NC}"
-                ./03_query_experiments.sh
+                echo -e "${CYAN}Running HA & Failover...${NC}"
+                ./ha_comparison.sh
                 ;;
             4)
-                echo -e "${CYAN}Running HA & Failover...${NC}"
-                ./06_ha_failover.sh
-                ;;
-            5)
                 schema_manager_menu
                 ;;
-            6)
+            5)
                 sql_console
                 clear
                 ;;
-            7)
+            6)
                 cluster_monitor
                 clear
                 ;;
