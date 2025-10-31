@@ -1,0 +1,79 @@
+
+services:
+  # ──────────────── Postgresql Database Server ────────────────
+  postgres:
+    image: postgres:15
+    container_name: pg_standard
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+      POSTGRES_DB: "${POSTGRES_DB:-mydb}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # ──────────────── Metrics Exporter ────────────────
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres_exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mydb}?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - postgres
+
+ # ──────────────── Node Exporter ────────────────
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node_exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points="^/(sys|proc|dev)($|/)"'
+
+  # ──────────────── Prometheus ────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus_pg
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - postgres-exporter
+
+  # ──────────────── Grafana ────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana_pg
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  # ──────────────── Benchmark ────────────────
+  pgbench:
+    image: postgres:15
+    container_name: pgbench
+    depends_on:
+      - postgres
+    entrypoint: ["tail", "-f", "/dev/null"]
+    volumes:
+      - ./benchmark:/scripts
+    networks:
+      - default
+      
+volumes:
+  pgdata:
+  grafana-storage:
