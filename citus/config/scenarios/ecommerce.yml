@@ -1,0 +1,170 @@
+# ================================================================================
+# CENÁRIO: E-COMMERCE PLATFORM
+# Arquivo: config/scenarios/ecommerce.yml
+# Descrição: Plataforma de e-commerce com produtos, pedidos e clientes
+# ================================================================================
+
+scenario:
+  name: "E-commerce Platform"
+  description: "Marketplace com sharding por região geográfica"
+  use_case: "E-commerce global com dados distribuídos por região"
+  complexity: "advanced"
+
+database:
+  name: "citus_platform"
+
+# Definição das tabelas para e-commerce
+tables:
+  # Tabela de referência - categorias
+  categories:
+    description: "Categorias de produtos"
+    type: "reference"
+    columns:
+      - name: "id"
+        type: "SERIAL PRIMARY KEY"
+      - name: "name"
+        type: "VARCHAR(100) NOT NULL"
+      - name: "description"
+        type: "TEXT"
+      - name: "parent_id"
+        type: "INTEGER"
+    data_file: "categories.csv"
+
+  # Tabela distribuída por região
+  customers:
+    description: "Clientes da plataforma"
+    type: "distributed"
+    shard_key: "region_id"
+    shard_count: 6  # Diferentes regiões
+    columns:
+      - name: "id"
+        type: "SERIAL"
+      - name: "region_id"
+        type: "INTEGER NOT NULL"
+      - name: "email"
+        type: "VARCHAR(255) UNIQUE NOT NULL"
+      - name: "name"
+        type: "VARCHAR(255) NOT NULL"
+      - name: "address"
+        type: "TEXT"
+      - name: "created_at"
+        type: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    primary_key: ["id", "region_id"]
+    indexes:
+      - name: "idx_customers_email"
+        columns: ["email"]
+    data_file: "customers.csv"
+
+  # Produtos distribuídos por categoria/região
+  products:
+    description: "Catálogo de produtos"
+    type: "distributed"
+    shard_key: "region_id"
+    shard_count: 6
+    colocated_with: "customers"
+    columns:
+      - name: "id"
+        type: "SERIAL"
+      - name: "region_id"
+        type: "INTEGER NOT NULL"
+      - name: "category_id"
+        type: "INTEGER NOT NULL"
+      - name: "name"
+        type: "VARCHAR(255) NOT NULL"
+      - name: "description"
+        type: "TEXT"
+      - name: "price"
+        type: "DECIMAL(10,2) NOT NULL"
+      - name: "stock"
+        type: "INTEGER DEFAULT 0"
+      - name: "created_at"
+        type: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    primary_key: ["id", "region_id"]
+    foreign_keys:
+      - column: "category_id"
+        references: "categories(id)"
+    data_file: "products.csv"
+
+  # Pedidos co-localizados com clientes
+  orders:
+    description: "Pedidos dos clientes"
+    type: "distributed"
+    shard_key: "region_id"
+    shard_count: 6
+    colocated_with: "customers"
+    columns:
+      - name: "id"
+        type: "SERIAL"
+      - name: "customer_id"
+        type: "INTEGER NOT NULL"
+      - name: "region_id"
+        type: "INTEGER NOT NULL"
+      - name: "total_amount"
+        type: "DECIMAL(12,2) NOT NULL"
+      - name: "status"
+        type: "VARCHAR(20) DEFAULT 'pending'"
+      - name: "order_date"
+        type: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    primary_key: ["id", "region_id"]
+    foreign_keys:
+      - column: "customer_id"
+        references: "customers(id)"
+    data_file: "orders.csv"
+
+  # Itens do pedido
+  order_items:
+    description: "Itens de cada pedido"
+    type: "distributed"
+    shard_key: "region_id"
+    shard_count: 6
+    colocated_with: "orders"
+    columns:
+      - name: "id"
+        type: "SERIAL"
+      - name: "order_id"
+        type: "INTEGER NOT NULL"
+      - name: "product_id"
+        type: "INTEGER NOT NULL"
+      - name: "region_id"
+        type: "INTEGER NOT NULL"
+      - name: "quantity"
+        type: "INTEGER NOT NULL"
+      - name: "unit_price"
+        type: "DECIMAL(10,2) NOT NULL"
+      - name: "total_price"
+        type: "DECIMAL(10,2) NOT NULL"
+    primary_key: ["id", "region_id"]
+    foreign_keys:
+      - column: "order_id"
+        references: "orders(id)"
+      - column: "product_id"
+        references: "products(id)"
+    data_file: "order_items.csv"
+
+# Estratégia de sharding por região
+sharding_strategy:
+  primary_shard_key: "region_id"
+  rationale: "Distribui dados geograficamente, reduzindo latência para usuários locais"
+  regions:
+    1: "North America"
+    2: "South America" 
+    3: "Europe"
+    4: "Asia Pacific"
+    5: "Middle East"
+    6: "Africa"
+
+# Queries de exemplo
+sample_queries:
+  - name: "Pedidos por região"
+    sql: "SELECT * FROM orders WHERE region_id = 1"
+    type: "single_shard"
+    
+  - name: "Produtos mais vendidos globalmente"
+    sql: |
+      SELECT p.name, SUM(oi.quantity) as total_sold
+      FROM products p
+      JOIN order_items oi ON p.id = oi.product_id AND p.region_id = oi.region_id
+      GROUP BY p.id, p.name
+      ORDER BY total_sold DESC
+      LIMIT 10
+    type: "cross_shard_aggregation"

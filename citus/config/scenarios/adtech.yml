@@ -1,0 +1,82 @@
+# ================================================================================
+# CENÁRIO: ADTECH PLATFORM
+# Arquivo: config/scenarios/adtech.yml
+# Descrição: Plataforma de publicidade digital com empresas, campanhas e anúncios
+# ================================================================================
+
+scenario:
+  name: "AdTech Platform"
+  description: "Plataforma de publicidade digital para demonstrar sharding por tenant"
+  use_case: "Multi-tenant SaaS com isolamento por empresa"
+  complexity: "intermediate"
+
+# Configuração do banco
+database:
+  name: "citus_platform"
+  charset: "UTF8"
+  locale: "en_US.UTF-8"
+
+# Importar configuração de tabelas
+import: "../tables.yml"
+
+# Dados de exemplo para gerar
+data_generation:
+  companies:
+    count: 100
+    distribution: "uniform"
+    patterns:
+      - name_prefix: ["TechCorp", "AdVantage", "Digital", "Marketing", "Brand"]
+      - industries: ["Technology", "Retail", "Finance", "Healthcare", "Education", "Entertainment"]
+      - countries: ["USA", "Brazil", "Germany", "Japan", "UK", "Canada"]
+
+  campaigns:
+    count_per_company: [5, 15]  # Min, Max campanhas por empresa
+    budget_range: [1000, 100000]
+    status_distribution:
+      active: 70%
+      paused: 20%
+      completed: 10%
+
+  ads:
+    count_per_campaign: [3, 12]  # Min, Max anúncios por campanha
+    cost_range: [10, 1000]
+    performance_simulation: true  # Simular clicks/impressions
+
+# Configurações específicas do cenário
+sharding_strategy:
+  primary_shard_key: "company_id"
+  rationale: "Isola dados por tenant (empresa), permitindo queries eficientes dentro de cada empresa"
+  colocated_tables: ["campaigns", "ads"]
+  
+# Queries de exemplo para demonstração
+sample_queries:
+  - name: "Campanhas por empresa"
+    sql: "SELECT * FROM campaigns WHERE company_id = 1"
+    type: "single_tenant"
+    description: "Query eficiente - todos dados em um shard"
+    
+  - name: "Total de campanhas ativas"
+    sql: "SELECT COUNT(*) FROM campaigns WHERE status = 'active'"
+    type: "cross_shard"
+    description: "Query cross-shard - precisa consultar todos os nós"
+    
+  - name: "Top empresas por orçamento"
+    sql: |
+      SELECT c.name, SUM(cam.budget) as total_budget
+      FROM companies c
+      JOIN campaigns cam ON c.id = cam.company_id
+      GROUP BY c.id, c.name
+      ORDER BY total_budget DESC
+      LIMIT 10
+    type: "reference_join"
+    description: "JOIN com tabela de referência - eficiente"
+
+# Cenários de teste de performance
+performance_tests:
+  - name: "Insert de nova campanha"
+    type: "single_shard_insert"
+    description: "Inserção isolada em um shard"
+    
+  - name: "Relatório cross-tenant"
+    type: "aggregation_query"
+    description: "Agregação que precisa consultar múltiplos shards"
