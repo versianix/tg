@@ -210,3 +210,4 @@ __marimo__/
 postgre/benchmark
 postgre/benchmark_universal
 citus/benchmark_universal
+comparison_charts/
