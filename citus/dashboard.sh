@@ -88,7 +88,7 @@ show_cluster_status() {
     echo -e "${CYAN}CLUSTER STATUS${NC}"
     echo "────────────────────────────────────────────────────────────────────────────────"
     
-    # Detectar arquitetura ativa
+    # Detect active architecture
     local arch=$(detect_architecture)
     local coordinator_container=$(get_coordinator_container)
     
@@ -334,12 +334,11 @@ show_menu() {
     echo -e "${PURPLE}UTILITIES${NC}"
     echo "────────────────────────────────────────────────────────────────────────────────"
     echo -e "${YELLOW}[5]${NC} SQL Console             - Connect directly to cluster"
-    echo -e "${YELLOW}[6]${NC} Cluster Monitor         - View real-time metrics"
     echo -e "${YELLOW}[0]${NC} Cleanup                 - Stop and clean environment"
     echo
     echo -e "${RED}[q]${NC} Exit"
     echo
-    echo -n -e "${CYAN}Select an option [0-7,q]: ${NC}"
+    echo -n -e "${CYAN}Select an option [0-5,q]: ${NC}"
 }
 
 # Function for Schema Manager
@@ -351,31 +350,54 @@ schema_manager_menu() {
     
     echo -e "${CYAN}Available Features:${NC}"
     echo "[1] List available scenarios"
-    echo "[2] Create complete schema"
-    echo "[3] Generate sample data"
-    echo "[4] Load data into database" 
-    echo "[5] Complete process (schema + data)"
+    echo "[2] Create schema from scenario"
+    echo "[3] Show current schema summary"
+    echo "[4] Clean schema (drop all tables)"
+    echo "[5] Generate sample data"
+    echo "[6] Load data from CSV files"
+    echo "[7] Complete process (schema + data)"
     echo "[0] Back"
     echo
-    echo -n -e "${CYAN}Choose an option [0-5]: ${NC}"
+    echo -n -e "${CYAN}Choose an option [0-7]: ${NC}"
     read -r schema_choice
     
     case $schema_choice in
         1)
-            echo -e "${CYAN}📋 Available scenarios:${NC}"
+            echo -e "${CYAN}Available scenarios:${NC}"
             ./scripts/schema_manager.sh list
             echo
             echo "Press Enter to continue..."
             read -r
             ;;
         2)
-            echo -e "${CYAN}🏗️ Create schema:${NC}"
-            ./scripts/schema_manager.sh interactive
+            echo
+            ./scripts/schema_manager.sh list
+            echo -n -e "${CYAN}Enter scenario to create: ${NC}"
+            read -r scenario
+            if [[ -n "$scenario" ]]; then
+                ./scripts/schema_manager.sh create "$scenario"
+            else
+                echo -e "${RED}Scenario name is required${NC}"
+            fi
             echo
             echo "Press Enter to continue..."
             read -r
             ;;
         3)
+            echo -e "${CYAN}Current schema summary:${NC}"
+            ./scripts/schema_manager.sh summary
+            echo
+            echo "Press Enter to continue..."
+            read -r
+            ;;
+        4)
+            echo -e "${CYAN}Clean schema:${NC}"
+            ./scripts/schema_manager.sh clean
+            echo
+            echo "Press Enter to continue..."
+            read -r
+            ;;
+        5)
             echo -n -e "${CYAN}Enter scenario to generate data: ${NC}"
             read -r scenario
             if [[ -n "$scenario" ]]; then
@@ -385,23 +407,20 @@ schema_manager_menu() {
             echo "Press Enter to continue..."
             read -r
             ;;
-        4)
-            echo -n -e "${CYAN}Enter scenario to load data: ${NC}"
-            read -r scenario
-            if [[ -n "$scenario" ]]; then
-                ./scripts/data_loader.sh load "$scenario"
-            fi
+        6)
+            echo -e "${CYAN}Load data from CSV files:${NC}"
+            ./scripts/data_loader.sh --load-all
             echo
             echo "Press Enter to continue..."
             read -r
             ;;
-        5)
+        7)
             echo -n -e "${CYAN}Enter scenario for complete process: ${NC}"
             read -r scenario
             if [[ -n "$scenario" ]]; then
-                echo -e "${YELLOW}🚀 Running complete process...${NC}"
+                echo -e "${YELLOW}Running complete process...${NC}"
                 ./scripts/schema_manager.sh create "$scenario"
-                ./scripts/data_loader.sh full "$scenario"
+                ./scripts/data_loader.sh load "$scenario"
             fi
             echo
             echo "Press Enter to continue..."
@@ -411,7 +430,7 @@ schema_manager_menu() {
             return
             ;;
         *)
-            echo -e "${RED}❌ Invalid option!${NC}"
+            echo -e "${RED}Invalid option!${NC}"
             sleep 1
             schema_manager_menu
             ;;
@@ -426,7 +445,7 @@ schema_manager_menu() {
 # Function for SQL console
 sql_console() {
     clear_screen
-    echo -e "${PURPLE}CONSOLE SQL INTERATIVO${NC}"
+    echo -e "${PURPLE}INTERACTIVE SQL CONSOLE${NC}"
     echo "────────────────────────────────────────────────────────────────────────────────"
     echo
     
@@ -464,7 +483,7 @@ sql_console() {
     echo -e "${YELLOW}To exit, type \\q and press Enter${NC}"
     echo
     
-    # Conectar diretamente ao PostgreSQL
+    # Connect directly to PostgreSQL
     docker exec -it "$coordinator_container" psql -U postgres -d "$DB_NAME"
     
     # Message after exiting psql
@@ -474,62 +493,12 @@ sql_console() {
     read -r
 }
 
-# Function for monitoring
-cluster_monitor() {
-    clear_screen
-    echo -e "${PURPLE}MONITOR DO CLUSTER${NC}"
-    echo "────────────────────────────────────────────────────────────────────────────────"
-    echo
-    
-    local coordinator_container=$(get_coordinator_container)
-    if [[ -z "$coordinator_container" ]] || ! docker exec "$coordinator_container" pg_isready -U postgres > /dev/null 2>&1; then
-        echo -e "${RED}Cluster is not running!${NC}"
-        echo
-        echo "Press Enter to go back..."
-        read -r
-        return
-    fi
-    
-    echo -e "${CYAN}Shard Distribution:${NC}"
-    docker exec -i "$coordinator_container" psql -U postgres -d "$DB_NAME" -c "
-    SELECT 
-        n.nodename,
-        n.nodeport,
-        COUNT(p.shardid) as shard_count,
-        ROUND(COUNT(p.shardid) * 100.0 / SUM(COUNT(p.shardid)) OVER(), 1) as percentage
-    FROM pg_dist_node n
-    LEFT JOIN pg_dist_shard_placement p ON n.groupid = p.groupid
-    WHERE n.noderole = 'primary'
-    GROUP BY n.groupid, n.nodename, n.nodeport
-    ORDER BY shard_count DESC;
-    "
-    
-    echo
-    echo -e "${CYAN}Table Sizes:${NC}"
-    docker exec -i "$coordinator_container" psql -U postgres -d "$DB_NAME" -c "
-    SELECT 
-        schemaname, 
-        tablename, 
-        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
-    FROM pg_tables 
-    WHERE schemaname = 'public'
-    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
-    "
-    
-    echo
-    echo -e "${CYAN}Monitoring Links:${NC}"
-    echo "- Grafana: http://localhost:3000"
-    echo "- Prometheus: http://localhost:9090"
-    echo "- Postgres Metrics: http://localhost:9187/metrics"
-    echo
-    echo "Press Enter to go back..."
-    read -r
-}
+
 
 # Function for cleanup
 cleanup_environment() {
     clear_screen
-    echo -e "${PURPLE}LIMPEZA DO AMBIENTE${NC}"
+    echo -e "${PURPLE}ENVIRONMENT CLEANUP${NC}"
     echo "────────────────────────────────────────────────────────────────────────────────"
     echo
     
@@ -565,35 +534,34 @@ cleanup_environment() {
 # Help function
 show_help() {
     clear_screen
-    echo -e "${PURPLE}❓ HELP AND DOCUMENTATION${NC}"
+    echo -e "${PURPLE}HELP AND DOCUMENTATION${NC}"
     echo "═══════════════════════"
     echo
-    echo -e "${CYAN}📚 Recommended Order:${NC}"
-    echo "1. Simple Setup - Configure o ambiente (ou use Schema Manager)"
-    echo "2. Schema Manager - Crie schemas personalizados"
-
-    echo "4. HA & Failover - Alta disponibilidade"
+    echo -e "${CYAN}Recommended Order:${NC}"
+    echo "1. Simple Setup - Configure environment (or use Schema Manager)"
+    echo "2. Schema Manager - Create custom schemas"
+    echo "4. HA & Failover - High availability"
     echo
-    echo -e "${CYAN}🛠️  Prerequisites:${NC}"
+    echo -e "${CYAN}Prerequisites:${NC}"
     echo "• Docker & Docker Compose installed"
     echo "• 8GB+ RAM available"
     echo "• Free ports: 5432, 3000, 9090, 9187, 9100"
     echo
-    echo -e "${CYAN}🔗 Useful Links:${NC}"
+    echo -e "${CYAN}Useful Links:${NC}"
     echo "• README.md - Complete documentation"
     echo "• Citus Docs: https://docs.citusdata.com/"
     echo "• PostgreSQL: https://www.postgresql.org/docs/"
     echo
-    echo -e "${CYAN}🐛 Troubleshooting:${NC}"
+    echo -e "${CYAN}Troubleshooting:${NC}"
     echo "• If ports are busy: docker-compose down"
     echo "• If memory is low: close other applications"
     echo "• For complete reset: use the Cleanup option"
     echo
-    echo "Pressione Enter para voltar..."
+    echo "Press Enter to go back..."
     read -r
 }
 
-# Loop principal
+# Main loop
 main() {
     while true; do
         show_menu
@@ -671,10 +639,6 @@ main() {
                 ;;
             5)
                 sql_console
-                clear
-                ;;
-            6)
-                cluster_monitor
                 clear
                 ;;
             0)
