@@ -407,10 +407,10 @@ show_patroni_topology() {
         SELECT 
             nodename as worker,
             nodeport as port,
-            CASE WHEN isactive THEN '✅ ACTIVE' ELSE '❌ INACTIVE' END as status
+            CASE WHEN isactive THEN 'ACTIVE' ELSE 'INACTIVE' END as status
         FROM pg_dist_node 
         WHERE noderole = 'primary'
-        ORDER BY nodename;" 2>/dev/null || echo "   ⚠️  Unable to query worker status"
+        ORDER BY nodename;" 2>/dev/null || echo "   Unable to query worker status"
     fi
 }
 
@@ -464,7 +464,7 @@ simulate_coordinator_failure() {
     if [[ -z "$coordinator" && "$env" == "patroni" ]]; then
         coordinator=$(get_patroni_leader)
         if [[ -z "$coordinator" ]]; then
-            log "ERROR" "❌ Could not detect current leader"
+            log "ERROR" "Could not detect current leader"
             return 1
         fi
     fi
@@ -658,7 +658,7 @@ check_patroni_cluster_health() {
 demonstrate_patroni_capabilities() {
     print_header "PATRONI CITUS - HA CAPABILITIES DEMO"
     
-    echo -e "${GREEN}🎯 OBJECTIVE: Show advanced HA capabilities of Patroni + Citus${NC}"
+    echo -e "${GREEN}OBJECTIVE: Show advanced HA capabilities of Patroni + Citus${NC}"
     echo -e "${GREEN}   This demonstrates production-ready high availability${NC}"
     echo
     
@@ -683,14 +683,14 @@ demonstrate_patroni_capabilities() {
     show_patroni_topology
     
     # Wait for new leader election
-    log "INFO" "⏳ Waiting for leader election..."
+    log "INFO" "Waiting for leader election..."
     sleep 10
     
     local new_leader
     new_leader=$(get_patroni_leader)
     
     if [[ -n "$new_leader" ]] && [[ "$new_leader" != "$leader" ]]; then
-        log "SUCCESS" "🎯 NEW LEADER ELECTED: $new_leader"
+        log "SUCCESS" "NEW LEADER ELECTED: $new_leader"
         show_patroni_topology
         test_query "patroni" "$new_leader" "$PATRONI_DB" "Query with new leader"
     else
@@ -720,7 +720,7 @@ demonstrate_patroni_capabilities() {
     if [[ -n "$w1_primary" ]]; then
         simulate_worker_failure "$w1_primary"
         
-        log "INFO" "⏳ Waiting for worker failover..."
+        log "INFO" "Waiting for worker failover..."
         sleep 10
         
         show_patroni_topology
@@ -729,7 +729,7 @@ demonstrate_patroni_capabilities() {
         new_w1_primary=$(get_patroni_primary_worker "1")
         
         if [[ -n "$new_w1_primary" ]] && [[ "$new_w1_primary" != "$w1_primary" ]]; then
-            log "SUCCESS" "🎯 WORKER FAILOVER SUCCESSFUL: $new_w1_primary is now primary"
+            log "SUCCESS" "WORKER FAILOVER SUCCESSFUL: $new_w1_primary is now primary"
         else
             log "WARN" "Worker failover may still be in progress"
         fi
@@ -750,26 +750,26 @@ demonstrate_patroni_capabilities() {
     fi
     
     print_section "PATRONI CITUS - CAPABILITIES SUMMARY"
-    echo -e "${GREEN}� PRODUCTION-READY HA CAPABILITIES:${NC}"
+    echo -e "${GREEN}PRODUCTION-READY HA CAPABILITIES:${NC}"
     echo
-    echo -e "   ${GREEN}✅ AUTOMATIC FAILOVER${NC}"
-    echo -e "      • Leader election in seconds"
-    echo -e "      • No manual intervention required"
+    echo -e "   ${GREEN}AUTOMATIC FAILOVER${NC}"
+    echo -e "      - Leader election in seconds"
+    echo -e "      - No manual intervention required"
     echo
-    echo -e "   ${GREEN}✅ ZERO DATA LOSS${NC}"
-    echo -e "      • Streaming replication"
-    echo -e "      • Synchronous commit options"
+    echo -e "   ${GREEN}ZERO DATA LOSS${NC}"
+    echo -e "      - Streaming replication"
+    echo -e "      - Synchronous commit options"
     echo
-    echo -e "   ${GREEN}✅ SELF-HEALING ARCHITECTURE${NC}"
-    echo -e "      • Automatic worker promotion"
-    echo -e "      • Continuous availability"
+    echo -e "   ${GREEN}SELF-HEALING ARCHITECTURE${NC}"
+    echo -e "      - Automatic worker promotion"
+    echo -e "      - Continuous availability"
     echo
-    echo -e "   ${GREEN}✅ PRODUCTION READY${NC}"
-    echo -e "      • 99.9%+ availability possible"
-    echo -e "      • Mission-critical application support"
+    echo -e "   ${GREEN}PRODUCTION READY${NC}"
+    echo -e "      - 99.9%+ availability possible"
+    echo -e "      - Mission-critical application support"
     
     echo
-    echo -e "${CYAN}🎯 RESULT: Enterprise-grade distributed database with HA${NC}"
+    echo -e "${CYAN}RESULT: Enterprise-grade distributed database with HA${NC}"
 }
 
 # =============================================================================
@@ -925,12 +925,12 @@ demonstrate_standard_limitations() {
 demonstrate_patroni_capabilities() {
     print_section "PATRONI CITUS - LIVE RESILIENCE TEST"
     
-    echo -e "${GREEN}🎯 LIVE DEMONSTRATION: Patroni Citus under failure${NC}"
+    echo -e "${GREEN}LIVE DEMONSTRATION: Patroni Citus under failure${NC}"
     echo -e "${GREEN}   Watch how queries continue working despite failures!${NC}"
     echo
     
     # Step 1: Baseline test
-    echo -e "${CYAN}📊 STEP 1: Baseline Performance${NC}"
+    echo -e "${CYAN}STEP 1: Baseline Performance${NC}"
     echo "Running baseline queries on healthy cluster..."
     run_baseline_queries "patroni"
     
@@ -938,7 +938,7 @@ demonstrate_patroni_capabilities() {
     read -r
     
     # Step 2: Worker failure (should handle gracefully)
-    echo -e "${YELLOW}💥 STEP 2: Worker Primary Failure${NC}"
+    echo -e "${YELLOW}STEP 2: Worker Primary Failure${NC}"
     echo "Failing worker primary - watch automatic failover!"
     simulate_worker_failure "patroni"
     
@@ -946,7 +946,7 @@ demonstrate_patroni_capabilities() {
     read -r
     
     # Step 3: Coordinator failover (should be automatic)
-    echo -e "${ORANGE}🔄 STEP 3: Coordinator Failover${NC}"
+    echo -e "${ORANGE}STEP 3: Coordinator Failover${NC}"
     echo "Failing coordinator leader - Patroni should elect new leader!"
     simulate_coordinator_failure "patroni"
     
@@ -1002,33 +1002,33 @@ run_baseline_queries() {
         "patroni") db_name="$PATRONI_DB" ;;
     esac
     
-    echo -e "${CYAN}🔍 Testing query performance...${NC}"
+    echo -e "${CYAN}Testing query performance...${NC}"
     
     # Test 1: Simple count query
-    echo -n "   • Company count query: "
+    echo -n "   Company count query: "
     if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM companies;" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ SUCCESS${NC}"
+        echo -e "${GREEN}SUCCESS${NC}"
     else
-        echo -e "${RED}❌ FAILED${NC}"
+        echo -e "${RED}FAILED${NC}"
     fi
     
     # Test 2: Distributed query
-    echo -n "   • Distributed campaign query: "
+    echo -n "   Distributed campaign query: "
     if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM campaigns;" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ SUCCESS${NC}"
+        echo -e "${GREEN}SUCCESS${NC}"
     else
-        echo -e "${RED}❌ FAILED${NC}"
+        echo -e "${RED}FAILED${NC}"
     fi
     
     # Test 3: Join query
-    echo -n "   • Cross-table join query: "
+    echo -n "   Cross-table join query: "
     if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM companies c JOIN campaigns camp ON c.id = camp.company_id;" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ SUCCESS${NC}"
+        echo -e "${GREEN}SUCCESS${NC}"
     else
-        echo -e "${RED}❌ FAILED${NC}"
+        echo -e "${RED}FAILED${NC}"
     fi
     
-    echo -e "${GREEN}📊 Baseline: All queries working normally${NC}"
+    echo -e "${GREEN}Baseline: All queries working normally${NC}"
 }
 
 simulate_worker_failure() {
@@ -1036,22 +1036,22 @@ simulate_worker_failure() {
     
     case "$arch" in
         "standard")
-            echo -e "${RED}💥 Pausing worker1...${NC}"
+            echo -e "${RED}Pausing worker1...${NC}"
             docker pause "$STANDARD_WORKER1" 2>/dev/null || true
             sleep 2
             
-            echo -e "${YELLOW}🔍 Testing queries with failed worker...${NC}"
+            echo -e "${YELLOW}Testing queries with failed worker...${NC}"
             test_queries_during_failure "$arch"
             ;;
         "patroni")
-            echo -e "${YELLOW}💥 Pausing worker1-primary...${NC}"
+            echo -e "${YELLOW}Pausing worker1-primary...${NC}"
             docker pause "$PATRONI_WORKER1_PRIMARY" 2>/dev/null || true
             sleep 3
             
-            echo -e "${CYAN}🔄 Patroni should promote standby automatically...${NC}"
+            echo -e "${CYAN}Patroni should promote standby automatically...${NC}"
             sleep 3
             
-            echo -e "${GREEN}🔍 Testing queries after automatic failover...${NC}"
+            echo -e "${GREEN}Testing queries after automatic failover...${NC}"
             test_queries_during_failure "$arch"
             ;;
     esac
@@ -1062,11 +1062,11 @@ simulate_coordinator_failure() {
     
     case "$arch" in
         "standard")
-            echo -e "${RED}🚨 Pausing coordinator...${NC}"
+            echo -e "${RED}Pausing coordinator...${NC}"
             docker pause "$STANDARD_COORDINATOR" 2>/dev/null || true
             sleep 2
             
-            echo -e "${RED}💀 This will break everything - no coordinator redundancy!${NC}"
+            echo -e "${RED}This will break everything - no coordinator redundancy!${NC}"
             test_queries_during_failure "$arch"
             ;;
         "patroni")
@@ -1141,58 +1141,58 @@ test_queries_during_failure() {
         "patroni") db_name="$PATRONI_DB" ;;
     esac
     
-    echo -e "${CYAN}🔍 Query results during failure:${NC}"
+    echo -e "${CYAN}Query results during failure:${NC}"
     
     # Test 1: Reference table (should always work)
-    echo -n "   • Basic company query: "
+    echo -n "   Basic company query: "
     if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM companies;" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ STILL WORKS${NC}"
+        echo -e "${GREEN}STILL WORKS${NC}"
     else
-        echo -e "${RED}❌ FAILED${NC}"
+        echo -e "${RED}FAILED${NC}"
     fi
     
     # Test 2: Distributed query (may fail during worker failure)
-    echo -n "   • Distributed campaign query: "
+    echo -n "   Distributed campaign query: "
     if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM campaigns;" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ STILL WORKS${NC}"
+        echo -e "${GREEN}STILL WORKS${NC}"
     else
         case "$arch" in
             "standard")
-                echo -e "${RED}❌ FAILED - DATA UNAVAILABLE${NC}"
+                echo -e "${RED}FAILED - DATA UNAVAILABLE${NC}"
                 ;;
             "patroni")
-                echo -e "${YELLOW}⏳ TEMPORARY FAILURE - Patroni failover in progress${NC}"
+                echo -e "${YELLOW}TEMPORARY FAILURE - Patroni failover in progress${NC}"
                 # Wait a bit and retry
                 sleep 3
-                echo -n "   • Retrying after Patroni failover: "
+                echo -n "   Retrying after Patroni failover: "
                 if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM campaigns;" >/dev/null 2>&1; then
-                    echo -e "${GREEN}✅ RECOVERED AUTOMATICALLY${NC}"
+                    echo -e "${GREEN}RECOVERED AUTOMATICALLY${NC}"
                 else
-                    echo -e "${YELLOW}⏳ Still failing - may need more time${NC}"
+                    echo -e "${YELLOW}Still failing - may need more time${NC}"
                 fi
                 ;;
         esac
     fi
     
     # Test 3: Join query (should work if both tables are accessible)
-    echo -n "   • Cross-table join query: "
+    echo -n "   Cross-table join query: "
     if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM companies c JOIN campaigns camp ON c.id = camp.company_id;" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ STILL WORKS${NC}"
+        echo -e "${GREEN}STILL WORKS${NC}"
     else
         case "$arch" in
             "standard")
-                echo -e "${RED}❌ FAILED - CROSS-SHARD DATA UNAVAILABLE${NC}"
+                echo -e "${RED}FAILED - CROSS-SHARD DATA UNAVAILABLE${NC}"
                 ;;
             "patroni")
-                echo -e "${YELLOW}⏳ TEMPORARY FAILURE - Waiting for failover${NC}"
+                echo -e "${YELLOW}TEMPORARY FAILURE - Waiting for failover${NC}"
                 # Wait a bit and retry for coordinator failovers
                 if [[ "$failure_type" == "coordinator" ]]; then
                     sleep 3
-                    echo -n "   • Retrying cross-table join: "
+                    echo -n "   Retrying cross-table join: "
                     if docker exec "$coordinator" psql -U postgres -d "$db_name" -t -c "SELECT COUNT(*) FROM companies c JOIN campaigns camp ON c.id = camp.company_id;" >/dev/null 2>&1; then
-                        echo -e "${GREEN}✅ RECOVERED AUTOMATICALLY${NC}"
+                        echo -e "${GREEN}RECOVERED AUTOMATICALLY${NC}"
                     else
-                        echo -e "${YELLOW}⏳ Still recovering - coordinator stabilizing${NC}"
+                        echo -e "${YELLOW}Still recovering - coordinator stabilizing${NC}"
                     fi
                 fi
                 ;;
