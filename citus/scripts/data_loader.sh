@@ -1,18 +1,11 @@
 #!/bin/bash
 
-# ██████╗  █████╗ ████████╗ █████╗     ██╗      ██████╗  █████╗ ██████╗ ███████╗██████╗ 
-# ██╔══██╗██╔══██╗╚══██╔══╝██╔══██╗    ██║     ██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗
-# ██║  ██║███████║   ██║   ███████║    ██║     ██║   ██║███████║██║  ██║█████╗  ██████╔╝
-# ██║  ██║██╔══██║   ██║   ██╔══██║    ██║     ██║   ██║██╔══██║██║  ██║██╔══╝  ██╔══██╗
-# ██████╔╝██║  ██║   ██║   ██║  ██║    ███████╗╚██████╔╝██║  ██║██████╔╝███████╗██║  ██║
-# ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝
-#
-# 📊 DATA LOADER: Carregador de CSVs fornecidos pelo usuário
-# Objetivo: Carregar dados de arquivos CSV nas tabelas distribuídas
+# DATA LOADER: CSV Data Loading System
+# Purpose: Load data from CSV files into distributed tables
 
 set -euo pipefail
 
-# Cores
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -22,16 +15,16 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Configurações
+# Configuration
 COMPOSE_PROJECT_NAME="citus"
 CONFIG_DIR="config"
 DATA_DIR="$CONFIG_DIR/data"
 CSV_DIR="$CONFIG_DIR/csv"
 SCENARIOS_DIR="$CONFIG_DIR/scenarios"
-COORDINATOR_CONTAINER=""  # Será detectado dinamicamente
-DATABASE_NAME=""  # Será detectado dinamicamente (citus_platform ou citus)
+COORDINATOR_CONTAINER=""  # Will be detected dynamically
+DATABASE_NAME=""  # Will be detected dynamically (citus_platform or citus)
 
-# Função para logs formatados
+# Function for formatted logging
 log() {
     local level="$1"
     shift
@@ -39,19 +32,19 @@ log() {
     local timestamp=$(date '+%H:%M:%S')
     
     case $level in
-        "INFO")  echo -e "${CYAN}[$timestamp] 📊 $message${NC}" ;;
-        "SUCCESS") echo -e "${GREEN}[$timestamp] ✅ $message${NC}" ;;
-        "WARNING") echo -e "${YELLOW}[$timestamp] ⚠️  $message${NC}" ;;
-        "ERROR") echo -e "${RED}[$timestamp] ❌ $message${NC}" ;;
+        "INFO")  echo -e "${CYAN}[$timestamp] INFO: $message${NC}" ;;
+        "SUCCESS") echo -e "${GREEN}[$timestamp] SUCCESS: $message${NC}" ;;
+        "WARNING") echo -e "${YELLOW}[$timestamp] WARNING: $message${NC}" ;;
+        "ERROR") echo -e "${RED}[$timestamp] ERROR: $message${NC}" ;;
     esac
 }
 
-# Função para detectar arquitetura ativa
+# Function to detect active architecture
 detect_architecture() {
-    # Verifica se há containers Patroni rodando
+    # Check if Patroni containers are running
     if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator1$"; then
         echo "patroni"
-    # Verifica se há container simples rodando
+    # Check if simple container is running
     elif docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
         echo "simple"
     else
@@ -59,7 +52,7 @@ detect_architecture() {
     fi
 }
 
-# Função para detectar coordinator baseado na arquitetura
+# Function to detect coordinator based on architecture
 detect_coordinator() {
     local arch=$(detect_architecture)
     
@@ -71,101 +64,101 @@ detect_coordinator() {
             detect_simple_coordinator
             ;;
         *)
-            log "ERROR" "Nenhuma arquitetura Citus detectada"
+            log "ERROR" "No Citus architecture detected"
             return 1
             ;;
     esac
 }
 
-# Função para detectar coordinator líder via API do Patroni
+# Function to detect Patroni leader coordinator via API
 detect_patroni_leader() {
-    log "INFO" "Detectando coordinator líder (Patroni)..."
+    log "INFO" "Detecting leader coordinator (Patroni)..."
     
-    # Tenta cada coordinator diretamente
+    # Try each coordinator directly
     for coord in coordinator1 coordinator2 coordinator3; do
         container_name="citus_$coord"
         
-        # Verifica se o container está rodando (versão que funcionou)
+        # Check if container is running
         docker_output=$(docker ps | grep "$container_name" || true)
         if [ -z "$docker_output" ]; then
             continue
         fi
         
-        # Usa API do Patroni para detectar líder
+        # Use Patroni API to detect leader
         leader=$(docker exec "$container_name" curl -s --connect-timeout 2 localhost:8008/cluster 2>/dev/null | \
                  grep -o '"name": "[^"]*", "role": "leader"' | grep -o '"name": "[^"]*"' | cut -d'"' -f4)
         
         if [ -n "$leader" ]; then
             COORDINATOR_CONTAINER="citus_$leader"
-            log "SUCCESS" "Coordinator líder detectado: $leader"
+            log "SUCCESS" "Leader coordinator detected: $leader"
             return 0
         fi
     done
     
-    log "WARNING" "Não foi possível detectar líder. Usando coordinator1 (fallback)"
+    log "WARNING" "Could not detect leader. Using coordinator1 (fallback)"
     COORDINATOR_CONTAINER="citus_coordinator1"
     return 1
 }
 
-# Função para detectar coordinator simples
+# Function to detect simple coordinator
 detect_simple_coordinator() {
-    log "INFO" "Detectando coordinator (Arquitetura Simples)..."
+    log "INFO" "Detecting coordinator (Simple Architecture)..."
     
     if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
         COORDINATOR_CONTAINER="citus_coordinator"
-        log "SUCCESS" "Coordinator detectado: citus_coordinator"
+        log "SUCCESS" "Coordinator detected: citus_coordinator"
         return 0
     else
-        log "ERROR" "Container citus_coordinator não encontrado"
+        log "ERROR" "Container citus_coordinator not found"
         return 1
     fi
 }
 
-# Função para verificar dependências
+# Function to check dependencies
 check_dependencies() {
-    log "INFO" "Verificando dependências..."
+    log "INFO" "Checking dependencies..."
     
     if ! command -v yq &> /dev/null; then
-        log "ERROR" "yq não encontrado. Instale com: brew install yq"
+        log "ERROR" "yq not found. Install with: brew install yq"
         exit 1
     fi
     
     if ! command -v docker &> /dev/null; then
-        log "ERROR" "Docker não encontrado"
+        log "ERROR" "Docker not found"
         exit 1
     fi
     
     if ! docker compose ps &> /dev/null; then
-        log "ERROR" "Docker Compose não disponível ou cluster não está rodando"
+        log "ERROR" "Docker Compose not available or cluster not running"
         exit 1
     fi
     
-    log "SUCCESS" "Dependências verificadas"
+    log "SUCCESS" "Dependencies verified"
 }
 
-# Função para verificar se cluster está rodando
+# Function to check if cluster is running
 check_cluster() {
-    log "INFO" "Verificando se cluster Citus está rodando..."
+    log "INFO" "Checking if Citus cluster is running..."
     
-    # Detectar coordinator líder
+    # Detect leader coordinator
     detect_coordinator || return 1
     
-    # Verificar conectividade - primeiro tentar citus_platform, depois citus
+    # Check connectivity - try citus_platform first, then citus
     if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus_platform -c "SELECT 1;" &> /dev/null; then
         DATABASE_NAME="citus_platform"
     elif docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d citus -c "SELECT 1;" &> /dev/null; then
         DATABASE_NAME="citus"
     else
-        log "ERROR" "Não é possível conectar ao cluster Citus"
+        log "ERROR" "Cannot connect to Citus cluster"
         exit 1
     fi
     
-    log "SUCCESS" "Cluster Citus está rodando (database: $DATABASE_NAME)"
+    log "SUCCESS" "Citus cluster is running (database: $DATABASE_NAME)"
 }
 
-# Função para listar tabelas disponíveis
+# Function to list available tables
 list_tables() {
-    log "INFO" "Tabelas disponíveis no tables.yml:"
+    log "INFO" "Available tables in tables.yml:"
     echo
     
     yq eval '.tables | keys' config/tables.yml | grep '^-' | sed 's/^- //' | while read -r table; do
@@ -183,7 +176,7 @@ list_tables() {
     echo
 }
 
-# Função para verificar se CSV existe para uma tabela
+# Function to check if CSV exists for a table
 check_csv_exists() {
     local table_name="$1"
     local csv_file="$CSV_DIR/${table_name}.csv"
@@ -195,124 +188,124 @@ check_csv_exists() {
     fi
 }
 
-# Função para validar estrutura do CSV
+# Function to validate CSV structure
 validate_csv_structure() {
     local table_name="$1"
     local csv_file="$CSV_DIR/${table_name}.csv"
     
-    log "INFO" "Validando estrutura do CSV para tabela '$table_name'..."
+    log "INFO" "Validating CSV structure for table '$table_name'..."
     
     if [[ ! -f "$csv_file" ]]; then
-        log "ERROR" "Arquivo CSV não encontrado: $csv_file"
+        log "ERROR" "CSV file not found: $csv_file"
         return 1
     fi
     
-    # Verifica se arquivo não está vazio
+    # Check if file is not empty
     if [[ ! -s "$csv_file" ]]; then
-        log "ERROR" "Arquivo CSV está vazio: $csv_file"
+        log "ERROR" "CSV file is empty: $csv_file"
         return 1
     fi
     
-    # Lê o cabeçalho do CSV
+    # Read CSV header
     local csv_header=$(head -n 1 "$csv_file")
-    log "INFO" "Cabeçalho encontrado: $csv_header"
+    log "INFO" "Header found: $csv_header"
     
-    # Obtém colunas esperadas da configuração
+    # Get expected columns from configuration
     local expected_columns=$(yq eval ".tables.\"$table_name\".columns | keys | join(\", \")" config/tables.yml)
-    log "INFO" "Colunas esperadas: $expected_columns"
+    log "INFO" "Expected columns: $expected_columns"
     
-    # Conta linhas de dados (excluindo cabeçalho)
+    # Count data lines (excluding header)
     local data_lines=$(tail -n +2 "$csv_file" | wc -l | xargs)
-    log "INFO" "Linhas de dados encontradas: $data_lines"
+    log "INFO" "Data lines found: $data_lines"
     
     return 0
 }
 
-# Função para carregar dados de uma tabela
+# Function to load data from a table
 load_table_data() {
     local table_name="$1"
     local csv_file="$CSV_DIR/${table_name}.csv"
     
-    log "INFO" "Carregando dados da tabela '$table_name'..."
+    log "INFO" "Loading data for table '$table_name'..."
     
-    # Valida estrutura do CSV
+    # Validate CSV structure
     if ! validate_csv_structure "$table_name"; then
         return 1
     fi
     
-    # Copia o arquivo CSV para dentro do container
+    # Copy CSV file to container
     docker cp "$csv_file" "$COORDINATOR_CONTAINER:/tmp/${table_name}.csv"
     
-    # Limpar dados existentes para evitar conflitos
-    log "INFO" "Limpando dados existentes da tabela '$table_name'..."
+    # Clear existing data to avoid conflicts
+    log "INFO" "Clearing existing data from table '$table_name'..."
     docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DATABASE_NAME" -c "TRUNCATE TABLE $table_name CASCADE;" 2>/dev/null || true
     
-    # Executa COPY para carregar os dados
+    # Execute COPY to load data
     local copy_command="\\COPY $table_name FROM '/tmp/${table_name}.csv' WITH (FORMAT csv, HEADER true);"
     
     if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DATABASE_NAME" -c "$copy_command"; then
-        log "SUCCESS" "Dados carregados com sucesso para tabela '$table_name'"
+        log "SUCCESS" "Data loaded successfully for table '$table_name'"
         
-        # Mostra estatísticas
+        # Show statistics
         local count=$(docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DATABASE_NAME" -t -c "SELECT COUNT(*) FROM $table_name;" | xargs)
-        log "INFO" "Total de registros na tabela '$table_name': $count"
+        log "INFO" "Total records in table '$table_name': $count"
         
-        # Remove arquivo temporário
+        # Remove temporary file
         docker exec "$COORDINATOR_CONTAINER" rm -f "/tmp/${table_name}.csv"
         
         return 0
     else
-        log "ERROR" "Falha ao carregar dados para tabela '$table_name'"
+        log "ERROR" "Failed to load data for table '$table_name'"
         return 1
     fi
 }
 
-# Função para carregar dados de todas as tabelas com CSVs disponíveis
+# Function to load data from all tables with available CSVs
 load_all_data() {
     check_dependencies
     check_cluster
     
-    log "INFO" "🚀 Carregando dados de todas as tabelas disponíveis..."
+    log "INFO" "Loading data from all available tables..."
     
-    # Lista arquivos CSV disponíveis
+    # List available CSV files
     if [[ ! -d "$CSV_DIR" ]]; then
-        log "WARNING" "Diretório CSV não encontrado: $CSV_DIR"
+        log "WARNING" "CSV directory not found: $CSV_DIR"
         return 1
     fi
     
-    # Para cada CSV encontrado, tenta carregar na tabela correspondente
+    # For each CSV found, try to load into corresponding table
     for csv_file in "$CSV_DIR"/*.csv; do
         if [[ -f "$csv_file" ]]; then
             local table_name=$(basename "$csv_file" .csv)
-            log "INFO" "Processando tabela: $table_name"
+            log "INFO" "Processing table: $table_name"
             load_table_data "$table_name"
         fi
     done
     
-    log "SUCCESS" "🎉 Carregamento completo finalizado!"
+    log "SUCCESS" "Complete loading finished!"
 }
 
-# Função para carregar dados de um cenário específico
+# Function to load data from a specific scenario
 load_scenario_data() {
     local scenario="$1"
     
     check_dependencies
     check_cluster
     
-    log "INFO" "🚀 Carregando dados do cenário: $scenario"
+    log "INFO" "Loading data from scenario: $scenario"
     
-    # Lista arquivos CSV disponíveis
+    # List available CSV files
     if [[ ! -d "$CSV_DIR" ]]; then
-        log "WARNING" "Diretório CSV não encontrado: $CSV_DIR"
+        log "WARNING" "CSV directory not found: $CSV_DIR"
         return 1
     fi
     
-    # Para cada CSV encontrado, tenta carregar na tabela correspondente
+    # For each CSV found, try to load into corresponding table
     local loaded_count=0
     for csv_file in "$CSV_DIR"/*.csv; do
         if [[ -f "$csv_file" ]]; then
             local table_name=$(basename "$csv_file" .csv)
-            log "INFO" "Processando tabela: $table_name"
+            log "INFO" "Processing table: $table_name"
             if load_table_data "$table_name"; then
                 loaded_count=$((loaded_count + 1))
             fi
@@ -320,23 +313,23 @@ load_scenario_data() {
     done
     
     if [ $loaded_count -gt 0 ]; then
-        log "SUCCESS" "🎉 Carregamento do cenário '$scenario' finalizado! ($loaded_count tabelas carregadas)"
+        log "SUCCESS" "Scenario '$scenario' loading finished! ($loaded_count tables loaded)"
     else
-        log "WARNING" "Nenhuma tabela foi carregada para o cenário '$scenario'"
+        log "WARNING" "No tables were loaded for scenario '$scenario'"
     fi
 }
 
-# Função para listar arquivos CSV disponíveis
+# Function to list available CSV files
 list_csv_files() {
-    log "INFO" "Arquivos CSV disponíveis:"
+    log "INFO" "Available CSV files:"
     echo
     
     if [[ ! -d "$CSV_DIR" ]]; then
-        log "WARNING" "Diretório $CSV_DIR não existe"
-        log "INFO" "Para usar esta funcionalidade:"
-        log "INFO" "  1. Crie o diretório: mkdir -p $CSV_DIR"
-        log "INFO" "  2. Adicione seus arquivos CSV com nomes correspondentes às tabelas"
-        log "INFO" "  3. Exemplo: companies.csv, campaigns.csv, ads.csv"
+        log "WARNING" "Directory $CSV_DIR does not exist"
+        log "INFO" "To use this functionality:"
+        log "INFO" "  1. Create directory: mkdir -p $CSV_DIR"
+        log "INFO" "  2. Add your CSV files with names corresponding to tables"
+        log "INFO" "  3. Example: companies.csv, campaigns.csv, ads.csv"
         return
     fi
     
@@ -350,9 +343,9 @@ list_csv_files() {
             local line_count=$(wc -l < "$csv_file")
             
             echo -e "  ${BOLD}$filename${NC}"
-            echo -e "    └─ Tabela: $table_name"
-            echo -e "    └─ Tamanho: $file_size"
-            echo -e "    └─ Linhas: $line_count"
+            echo -e "    └─ Table: $table_name"
+            echo -e "    └─ Size: $file_size"
+            echo -e "    └─ Lines: $line_count"
             echo
             
             ((csv_count++))
@@ -360,42 +353,42 @@ list_csv_files() {
     done
     
     if [[ $csv_count -eq 0 ]]; then
-        log "WARNING" "Nenhum arquivo CSV encontrado em $CSV_DIR"
-        log "INFO" "Adicione seus arquivos CSV neste diretório para usar o carregamento de dados"
+        log "WARNING" "No CSV files found in $CSV_DIR"
+        log "INFO" "Add your CSV files to this directory to use data loading"
     else
-        log "INFO" "Total de arquivos CSV encontrados: $csv_count"
+        log "INFO" "Total CSV files found: $csv_count"
     fi
 }
 
-# Função para criar diretório CSV de exemplo
+# Function to create CSV template directory
 create_csv_template() {
-    log "INFO" "Criando estrutura de diretório e templates de exemplo..."
+    log "INFO" "Creating directory structure and example templates..."
     
-    # Cria diretório
+    # Create directory
     mkdir -p "$CSV_DIR"
     
-    # Cria arquivo README com instruções
+    # Create README file with instructions
     cat > "$CSV_DIR/README.md" << 'EOF'
-# Diretório de Arquivos CSV
+# CSV Files Directory
 
-Este diretório contém os arquivos CSV que serão carregados nas tabelas do Citus.
+This directory contains CSV files that will be loaded into Citus tables.
 
-## Estrutura
+## Structure
 
-Cada arquivo CSV deve ter o mesmo nome da tabela correspondente:
-- `companies.csv` → tabela `companies`
-- `campaigns.csv` → tabela `campaigns`
-- `ads.csv` → tabela `ads`
+Each CSV file should have the same name as the corresponding table:
+- `companies.csv` → `companies` table
+- `campaigns.csv` → `campaigns` table
+- `ads.csv` → `ads` table
 
-## Formato
+## Format
 
-Os arquivos devem ter:
-1. **Cabeçalho**: Primeira linha com nomes das colunas
-2. **Dados**: Linhas subsequentes com dados separados por vírgula
+Files should have:
+1. **Header**: First line with column names
+2. **Data**: Subsequent lines with comma-separated data
 3. **Encoding**: UTF-8
-4. **Separador**: Vírgula (,)
+4. **Separator**: Comma (,)
 
-## Exemplo de companies.csv
+## Example companies.csv
 
 ```csv
 id,name,industry,country,created_at
@@ -403,37 +396,37 @@ id,name,industry,country,created_at
 2,"Marketing Pro","marketing","USA","2024-01-16 14:20:00"
 ```
 
-## Comando para carregar
+## Command to load
 
 ```bash
 ./scripts/data_loader.sh --load-all
 ```
 EOF
     
-    log "SUCCESS" "Estrutura criada em $CSV_DIR"
-    log "INFO" "Consulte $CSV_DIR/README.md para instruções detalhadas"
+    log "SUCCESS" "Structure created in $CSV_DIR"
+    log "INFO" "Check $CSV_DIR/README.md for detailed instructions"
 }
 
-# Função principal com menu interativo
+# Main function with interactive menu
 main_menu() {
     echo
-    echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${BLUE}║              🗃️  DATA LOADER                     ║${NC}"
-    echo -e "${BOLD}${BLUE}║          Carregamento de CSVs                    ║${NC}"
-    echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════╝${NC}"
+    echo -e "${PURPLE}=====================================================${NC}"
+    echo -e "${PURPLE}                   DATA LOADER                      ${NC}"
+    echo -e "${PURPLE}                  CSV Data Loading                  ${NC}"
+    echo -e "${PURPLE}=====================================================${NC}"
     echo
     
-    echo -e "${BOLD}Opções disponíveis:${NC}"
+    echo -e "${BOLD}Available options:${NC}"
     echo
-    echo -e "  ${CYAN}1${NC} - 📋 Listar tabelas configuradas"
-    echo -e "  ${CYAN}2${NC} - 📁 Listar arquivos CSV disponíveis"
-    echo -e "  ${CYAN}3${NC} - 📊 Carregar dados de uma tabela específica"
-    echo -e "  ${CYAN}4${NC} - 🚀 Carregar dados de todas as tabelas"
-    echo -e "  ${CYAN}5${NC} - 📝 Criar estrutura de CSVs de exemplo"
-    echo -e "  ${CYAN}0${NC} - 🚪 Voltar ao menu principal"
+    echo -e "  ${CYAN}1${NC} - List configured tables"
+    echo -e "  ${CYAN}2${NC} - List available CSV files"
+    echo -e "  ${CYAN}3${NC} - Load data from specific table"
+    echo -e "  ${CYAN}4${NC} - Load data from all tables"
+    echo -e "  ${CYAN}5${NC} - Create example CSV structure"
+    echo -e "  ${CYAN}0${NC} - Return to main menu"
     echo
     
-    read -p "$(echo -e ${CYAN}Escolha uma opção [0-5]: ${NC})" choice
+    read -p "$(echo -e ${CYAN}Choose an option [0-5]: ${NC})" choice
     
     case $choice in
         1)
@@ -448,49 +441,49 @@ main_menu() {
             ;;
         3)
             echo
-            read -p "$(echo -e ${CYAN}Nome da tabela: ${NC})" table_name
+            read -p "$(echo -e ${CYAN}Table name: ${NC})" table_name
             if [[ -n "$table_name" ]]; then
                 load_table_data "$table_name"
             else
-                log "ERROR" "Nome da tabela é obrigatório"
+                log "ERROR" "Table name is required"
             fi
-            read -p "Pressione Enter para continuar..."
+            read -p "Press Enter to continue..."
             main_menu
             ;;
         4)
             load_all_data
-            read -p "Pressione Enter para continuar..."
+            read -p "Press Enter to continue..."
             main_menu
             ;;
         5)
             create_csv_template
-            read -p "Pressione Enter para continuar..."
+            read -p "Press Enter to continue..."
             main_menu
             ;;
         0)
-            log "INFO" "Voltando ao menu principal..."
+            log "INFO" "Returning to main menu..."
             exit 0
             ;;
         *)
-            log "ERROR" "Opção inválida: $choice"
+            log "ERROR" "Invalid option: $choice"
             sleep 1
             main_menu
             ;;
     esac
 }
 
-# Função principal
+# Main function
 main() {
     check_dependencies
     check_cluster
     
-    # Se não há argumentos, mostra menu interativo
+    # If no arguments, show interactive menu
     if [[ $# -eq 0 ]]; then
         main_menu
         return
     fi
     
-    # Processa argumentos da linha de comando
+    # Process command line arguments
     case "$1" in
         "--list-tables")
             list_tables
@@ -505,16 +498,16 @@ main() {
             if [[ -n "${2:-}" ]]; then
                 load_table_data "$2"
             else
-                log "ERROR" "Nome da tabela é obrigatório"
+                log "ERROR" "Table name is required"
                 exit 1
             fi
             ;;
         "load")
-            # Compatibilidade com dashboard - carrega dados do cenário
+            # Dashboard compatibility - load scenario data
             if [[ -n "${2:-}" ]]; then
                 load_scenario_data "$2"
             else
-                log "ERROR" "Nome do cenário é obrigatório"
+                log "ERROR" "Scenario name is required"
                 exit 1
             fi
             ;;
@@ -522,27 +515,27 @@ main() {
             create_csv_template
             ;;
         "--help"|"-h")
-            echo -e "${BOLD}Data Loader - Carregamento de CSVs${NC}"
+            echo -e "${BOLD}Data Loader - CSV Loading System${NC}"
             echo
-            echo "Uso: $0 [opção] [argumentos]"
+            echo "Usage: $0 [option] [arguments]"
             echo
-            echo "Opções:"
-            echo "  --list-tables          Lista tabelas configuradas"
-            echo "  --list-csv             Lista arquivos CSV disponíveis"
-            echo "  --load-all             Carrega dados de todas as tabelas"
-            echo "  --load-table <nome>    Carrega dados de uma tabela específica"
-            echo "  --create-template      Cria estrutura de CSVs de exemplo"
-            echo "  --help, -h             Mostra esta ajuda"
+            echo "Options:"
+            echo "  --list-tables          List configured tables"
+            echo "  --list-csv             List available CSV files"
+            echo "  --load-all             Load data from all tables"
+            echo "  --load-table <name>    Load data from specific table"
+            echo "  --create-template      Create example CSV structure"
+            echo "  --help, -h             Show this help"
             echo
-            echo "Sem argumentos: Executa menu interativo"
+            echo "No arguments: Run interactive menu"
             ;;
         *)
-            log "ERROR" "Opção inválida: $1"
-            log "INFO" "Use --help para ver opções disponíveis"
+            log "ERROR" "Invalid option: $1"
+            log "INFO" "Use --help to see available options"
             exit 1
             ;;
     esac
 }
 
-# Executa função principal
+# Execute main function
 main "$@"
