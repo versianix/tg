@@ -1,20 +1,21 @@
 #!/bin/bash
 
 # ================================================================================
-# PostgreSQL Standard Dashboard
-# Desenvolvido para Trabalho de Graduação
-# 
-# Dashboard interativo para ambiente PostgreSQL padrão (baseline)
-# Permite comparação com ambiente Citus distribuído
+#                         POSTGRESQL BASELINE LABORATORY
+#                            Monolithic Database Benchmark
+#                             Bachelor's Thesis Project
 # ================================================================================
+#
+# Interactive Dashboard - Baseline PostgreSQL Environment
+# Objective: Control interface for PostgreSQL monolithic database testing
 
 set -euo pipefail
 
 # ================================================================================
-# CONFIGURAÇÕES E CONSTANTES
+# SETTINGS AND CONSTANTS
 # ================================================================================
 
-# Cores para output
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -24,16 +25,16 @@ CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
-# Configurações do banco
+# Database settings
 DATABASE_NAME="benchmark_db"
 POSTGRES_USER="postgres"
 POSTGRES_PASSWORD="postgres"
 
 # ================================================================================
-# FUNÇÕES DE UTILIDADE
+# UTILITY FUNCTIONS
 # ================================================================================
 
-# Função para logging com timestamp
+# Function for logging with timestamp
 log() {
     local level=$1
     shift
@@ -49,21 +50,21 @@ log() {
     esac
 }
 
-# Função para verificar se container está rodando
+# Function to check if container is running
 is_container_running() {
     local container_name=$1
     docker ps --format "{{.Names}}" | grep -q "^${container_name}$"
 }
 
-# Função para aguardar PostgreSQL estar pronto
+# Function to wait for PostgreSQL to be ready
 wait_for_postgres() {
-    log "INFO" "Aguardando PostgreSQL estar pronto..."
+    log "INFO" "Waiting for PostgreSQL to be ready..."
     local max_attempts=30
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
         if docker exec pg_standard pg_isready -U postgres >/dev/null 2>&1; then
-            log "INFO" "✅ PostgreSQL pronto!"
+            log "INFO" "PostgreSQL ready!"
             return 0
         fi
         
@@ -72,53 +73,53 @@ wait_for_postgres() {
         ((attempt++))
     done
     
-    log "ERROR" "❌ PostgreSQL não ficou pronto após ${max_attempts} tentativas"
+    log "ERROR" "PostgreSQL not ready after ${max_attempts} attempts"
     return 1
 }
 
 # ================================================================================
-# FUNÇÕES DE STATUS
+# STATUS FUNCTIONS
 # ================================================================================
 
-# Mostrar status dos containers
+# Show containers status
 show_containers_status() {
-    echo -e "\n${BLUE}📦 STATUS DOS CONTAINERS${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${BLUE}CONTAINER STATUS${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     local containers=("pg_standard" "postgres_exporter" "node_exporter" "prometheus_pg" "grafana_pg" "pgbench")
     
     for container in "${containers[@]}"; do
         if is_container_running "$container"; then
-            local status="🟢 ATIVO"
+            local status="ACTIVE"
             local uptime=$(docker ps --format "{{.Status}}" --filter "name=^${container}$")
             echo -e "   ${container}: ${GREEN}${status}${NC} (${uptime})"
         else
-            echo -e "   ${container}: ${RED}🔴 INATIVO${NC}"
+            echo -e "   ${container}: ${RED}INACTIVE${NC}"
         fi
     done
 }
 
-# Mostrar status do banco de dados
+# Show database status
 show_database_status() {
-    echo -e "\n${BLUE}🗄️  STATUS DO BANCO DE DADOS${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${BLUE}DATABASE STATUS${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     if ! is_container_running "pg_standard"; then
-        echo -e "   ${RED}❌ PostgreSQL não está rodando${NC}"
+        echo -e "   ${RED}PostgreSQL is not running${NC}"
         return
     fi
     
-    # Verificar se o database existe
+    # Check if the database exists
     local db_exists=$(docker exec pg_standard psql -U postgres -t -c "SELECT 1 FROM pg_database WHERE datname='${DATABASE_NAME}'" 2>/dev/null | grep -c "1" || echo "0")
     
     if [ "$db_exists" = "1" ]; then
-        echo -e "   Database: ${GREEN}✅ ${DATABASE_NAME}${NC}"
+        echo -e "   Database: ${GREEN}${DATABASE_NAME} ACTIVE${NC}"
         
-        # Verificar tabelas
+        # Check tables
         local tables_count=$(docker exec pg_standard psql -U postgres -d "${DATABASE_NAME}" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || echo "0")
-        echo -e "   Tabelas: ${GREEN}${tables_count} tabelas criadas${NC}"
+        echo -e "   Tables: ${GREEN}${tables_count} tables created${NC}"
         
-        # Verificar dados
+        # Check data
         if [ "$tables_count" -gt "0" ]; then
             local total_records=0
             local tables=("companies" "campaigns" "ads" "system_metrics")
@@ -126,242 +127,234 @@ show_database_status() {
             for table in "${tables[@]}"; do
                 local count=$(docker exec pg_standard psql -U postgres -d "${DATABASE_NAME}" -t -c "SELECT COUNT(*) FROM ${table}" 2>/dev/null || echo "0")
                 if [ "$count" -gt "0" ]; then
-                    echo -e "   • ${table}: ${GREEN}${count} registros${NC}"
+                    echo -e "   - ${table}: ${GREEN}${count} records${NC}"
                     ((total_records += count))
                 else
-                    echo -e "   • ${table}: ${YELLOW}vazia${NC}"
+                    echo -e "   - ${table}: ${YELLOW}empty${NC}"
                 fi
             done
             
-            echo -e "   Total de registros: ${GREEN}${total_records}${NC}"
+            echo -e "   Total records: ${GREEN}${total_records}${NC}"
         fi
     else
-        echo -e "   Database: ${YELLOW}⚠️  ${DATABASE_NAME} não criado${NC}"
+        echo -e "   Database: ${YELLOW}${DATABASE_NAME} not created${NC}"
     fi
 }
 
-# Mostrar status dos serviços de monitoramento
+# Show monitoring services status
 show_monitoring_status() {
-    echo -e "\n${BLUE}📊 SERVIÇOS DE MONITORAMENTO${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${BLUE}MONITORING SERVICES${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     # Prometheus
     if is_container_running "prometheus_pg"; then
-        echo -e "   Prometheus: ${GREEN}✅ Ativo${NC} - http://localhost:9090"
+        echo -e "   Prometheus: ${GREEN}ACTIVE${NC} - http://localhost:9090"
     else
-        echo -e "   Prometheus: ${RED}❌ Inativo${NC}"
+        echo -e "   Prometheus: ${RED}INACTIVE${NC}"
     fi
     
     # Grafana
     if is_container_running "grafana_pg"; then
-        echo -e "   Grafana: ${GREEN}✅ Ativo${NC} - http://localhost:3000 (admin/admin)"
+        echo -e "   Grafana: ${GREEN}ACTIVE${NC} - http://localhost:3000 (admin/admin)"
     else
-        echo -e "   Grafana: ${RED}❌ Inativo${NC}"
+        echo -e "   Grafana: ${RED}INACTIVE${NC}"
     fi
     
     # Postgres Exporter
     if is_container_running "postgres_exporter"; then
-        echo -e "   Postgres Exporter: ${GREEN}✅ Ativo${NC} - http://localhost:9187"
+        echo -e "   Postgres Exporter: ${GREEN}ACTIVE${NC} - http://localhost:9187"
     else
-        echo -e "   Postgres Exporter: ${RED}❌ Inativo${NC}"
+        echo -e "   Postgres Exporter: ${RED}INACTIVE${NC}"
     fi
     
     # Node Exporter
     if is_container_running "node_exporter"; then
-        echo -e "   Node Exporter: ${GREEN}✅ Ativo${NC} - http://localhost:9100"
+        echo -e "   Node Exporter: ${GREEN}ACTIVE${NC} - http://localhost:9100"
     else
-        echo -e "   Node Exporter: ${RED}❌ Inativo${NC}"
+        echo -e "   Node Exporter: ${RED}INACTIVE${NC}"
     fi
 }
 
 # ================================================================================
-# FUNÇÕES DE OPERAÇÃO
+# OPERATION FUNCTIONS
 # ================================================================================
 
-# Iniciar ambiente
+# Start environment
 start_environment() {
-    echo -e "\n${PURPLE}🚀 INICIANDO AMBIENTE POSTGRESQL${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}STARTING POSTGRESQL ENVIRONMENT${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
-    log "INFO" "Iniciando containers com docker-compose..."
+    log "INFO" "Starting containers with docker-compose..."
     
     if docker-compose up -d; then
-        log "INFO" "✅ Containers iniciados com sucesso!"
+        log "INFO" "Containers started successfully!"
         
-        # Aguardar PostgreSQL
+        # Wait for PostgreSQL
         if wait_for_postgres; then
-            echo -e "\n${GREEN}✅ Ambiente PostgreSQL iniciado com sucesso!${NC}"
-            echo -e "\n📝 Para conectar ao banco:"
+            echo -e "\n${GREEN}PostgreSQL environment started successfully!${NC}"
+            echo -e "\nTo connect to the database:"
             echo -e "   docker exec -it pg_standard psql -U postgres -d ${DATABASE_NAME}"
         fi
     else
-        log "ERROR" "❌ Falha ao iniciar containers"
+        log "ERROR" "Failed to start containers"
         return 1
     fi
 }
 
-# Parar ambiente
+# Stop environment
 stop_environment() {
-    echo -e "\n${PURPLE}⏹️  PARANDO AMBIENTE${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}STOPPING ENVIRONMENT${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
-    log "INFO" "Parando todos os containers..."
+    log "INFO" "Stopping all containers..."
     
     if docker-compose down; then
-        log "INFO" "✅ Ambiente parado com sucesso!"
+        log "INFO" "Environment stopped successfully!"
     else
-        log "ERROR" "❌ Falha ao parar containers"
+        log "ERROR" "Failed to stop containers"
         return 1
     fi
 }
 
-# Limpar ambiente completamente
+# Clean environment completely
 cleanup_environment() {
-    echo -e "\n${PURPLE}🧹 LIMPEZA COMPLETA DO AMBIENTE${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}COMPLETE ENVIRONMENT CLEANUP${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
-    read -p "⚠️  Isso irá remover TODOS os dados. Confirma? (y/N): " -n 1 -r
+    read -p "WARNING: This will remove ALL data. Confirm? (y/N): " -n 1 -r
     echo
     
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log "INFO" "Parando e removendo containers e volumes..."
+        log "INFO" "Stopping and removing containers and volumes..."
         
         docker-compose down -v 2>/dev/null || true
         
-        log "INFO" "✅ Limpeza concluída!"
+        log "INFO" "Cleanup completed!"
     else
-        log "INFO" "Operação cancelada"
+        log "INFO" "Operation cancelled"
     fi
 }
 
-# Criar schema do banco
+# Setup database schema
 setup_database() {
-    echo -e "\n${PURPLE}🏗️  CONFIGURANDO BANCO DE DADOS${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}SETTING UP DATABASE${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     if ! is_container_running "pg_standard"; then
-        log "ERROR" "❌ PostgreSQL não está rodando. Execute 'start' primeiro."
+        log "ERROR" "PostgreSQL is not running. Execute 'start' first."
         return 1
     fi
     
-    log "INFO" "Criando database ${DATABASE_NAME}..."
+    log "INFO" "Creating database ${DATABASE_NAME}..."
     
-    # Criar database se não existir
-    docker exec pg_standard psql -U postgres -c "CREATE DATABASE ${DATABASE_NAME}" 2>/dev/null || log "INFO" "Database já existe"
+    # Create database if it doesn't exist
+    docker exec pg_standard psql -U postgres -c "CREATE DATABASE ${DATABASE_NAME}" 2>/dev/null || log "INFO" "Database already exists"
     
-    log "INFO" "Executando script de schema..."
+    log "INFO" "Running schema script..."
     
         # Execute schema script
     if [ -f "schema.sql" ]; then
         docker exec -i pg_standard psql -U postgres -d "${DATABASE_NAME}" < schema.sql
-        log "INFO" "✅ Schema created successfully!"
+        log "INFO" "Schema created successfully!"
     else
-        log "ERROR" "❌ Arquivo schema.sql não encontrado"
+        log "ERROR" "schema.sql file not found"
         return 1
     fi
 }
 
-# Carregar dados
+# Load data
 load_data() {
-    echo -e "\n${PURPLE}📥 CARREGANDO DADOS${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}LOADING DATA${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     if ! is_container_running "pg_standard"; then
-        log "ERROR" "❌ PostgreSQL não está rodando. Execute 'start' primeiro."
+        log "ERROR" "PostgreSQL is not running. Execute 'start' first."
         return 1
     fi
     
-    # Verificar se database e tabelas existem
+    # Check if database and tables exist
     local db_exists=$(docker exec pg_standard psql -U postgres -t -c "SELECT 1 FROM pg_database WHERE datname='${DATABASE_NAME}'" 2>/dev/null | grep -c "1" || echo "0")
     
     if [ "$db_exists" = "0" ]; then
-        log "ERROR" "❌ Database ${DATABASE_NAME} não existe. Execute 'setup' primeiro."
+        log "ERROR" "Database ${DATABASE_NAME} does not exist. Execute 'setup' first."
         return 1
     fi
     
     if [ -f "load_data.sh" ]; then
-        log "INFO" "Executando carregamento de dados..."
+        log "INFO" "Running data loading..."
         bash load_data.sh "${DATABASE_NAME}"
-        log "INFO" "✅ Dados carregados com sucesso!"
+        log "INFO" "Data loaded successfully!"
     else
-        log "ERROR" "❌ Script load_data.sh não encontrado"
+        log "ERROR" "load_data.sh script not found"
         return 1
     fi
 }
 
-# Executar benchmark
+# Run benchmark
 run_benchmark() {
-    echo -e "\n${PURPLE}⚡ EXECUTANDO BENCHMARK${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}RUNNING BENCHMARK${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     if ! is_container_running "pg_standard"; then
-        log "ERROR" "❌ PostgreSQL não está rodando. Execute 'start' primeiro."
+        log "ERROR" "PostgreSQL is not running. Execute 'start' first."
         return 1
     fi
     
-    if [ -f "pgbench_professional.sh" ]; then
-        log "INFO" "Iniciando benchmark profissional..."
-        bash pgbench_professional.sh
-        log "INFO" "✅ Benchmark concluído! Verifique os resultados em benchmark/"
+    if [ -f "pgbench.sh" ]; then
+        log "INFO" "Starting professional benchmark..."
+        bash pgbench.sh
+        log "INFO" "Benchmark completed! Check results in benchmark/"
     else
-        log "ERROR" "❌ Script pgbench_professional.sh não encontrado"
+        log "ERROR" "pgbench.sh script not found"
         return 1
     fi
 }
 
 # ================================================================================
-# MENU PRINCIPAL
+# MAIN MENU
 # ================================================================================
 
 show_main_menu() {
     clear
-    echo -e "${WHITE}"
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║              🐘 POSTGRESQL STANDARD DASHBOARD               ║"
-    echo "║                    Ambiente de Baseline                     ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo -e "${BLUE}"
+    echo "================================================================================"
+    echo "                         POSTGRESQL Monolithic Database"
+    echo "                             Bachelor's Thesis Project"
+    echo "================================================================================"
     echo -e "${NC}"
     
     show_containers_status
     show_database_status
     show_monitoring_status
     
-    echo -e "\n${YELLOW}🎯 OPERAÇÕES DISPONÍVEIS:${NC}"
-    echo "════════════════════════════════════════════════════════════════"
-    echo -e "   ${GREEN}1.${NC} start      → Iniciar ambiente completo"
-    echo -e "   ${GREEN}2.${NC} setup      → Criar database e tabelas"
-    echo -e "   ${GREEN}3.${NC} load-data  → Carregar dados CSV"
-    echo -e "   ${GREEN}4.${NC} benchmark  → Executar benchmark"
-    echo -e "   ${GREEN}5.${NC} stop       → Parar ambiente"
-    echo -e "   ${GREEN}6.${NC} cleanup    → Limpeza completa"
-    echo -e "   ${GREEN}7.${NC} logs       → Ver logs dos containers"
-    echo -e "   ${GREEN}8.${NC} connect    → Conectar ao PostgreSQL"
-    echo -e "   ${GREEN}r.${NC} refresh    → Atualizar status"
-    echo -e "   ${GREEN}q.${NC} quit       → Sair"
-    
-    echo -e "\n${BLUE}📖 FLUXO RECOMENDADO:${NC}"
-    echo -e "   1. start → 2. setup → 3. load-data → 4. benchmark"
-    
-    echo -e "\n${CYAN}🔗 ACESSO RÁPIDO:${NC}"
-    echo -e "   • PostgreSQL: docker exec -it pg_standard psql -U postgres -d ${DATABASE_NAME}"
-    echo -e "   • Grafana: http://localhost:3000 (admin/admin)"
-    echo -e "   • Prometheus: http://localhost:9090"
+    echo -e "\n${YELLOW}AVAILABLE OPERATIONS${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
+    echo -e "${YELLOW}[1]${NC} Start Environment    - Initialize complete PostgreSQL stack"
+    echo -e "${YELLOW}[2]${NC} Setup Database       - Create database schema and tables"
+    echo -e "${YELLOW}[3]${NC} Load Data           - Import CSV seed data"
+    echo -e "${YELLOW}[4]${NC} Run Benchmark       - Execute performance tests"
+    echo -e "${YELLOW}[5]${NC} Stop Environment    - Graceful shutdown"
+    echo -e "${YELLOW}[6]${NC} Cleanup             - Complete environment reset"
+    echo -e "${YELLOW}[7]${NC} View Logs           - Container log inspection"
+    echo -e "${YELLOW}[8]${NC} SQL Console         - Direct PostgreSQL connection"
+    echo -e "${YELLOW}[r]${NC} Refresh Status      - Update dashboard"
+    echo -e "${YELLOW}[q]${NC} Exit"
     
     echo -e "\n────────────────────────────────────────────────────────────────"
 }
 
-# Ver logs dos containers
+# View container logs
 show_logs() {
-    echo -e "\n${PURPLE}📋 LOGS DOS CONTAINERS${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}CONTAINER LOGS${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
-    echo -e "Escolha o container:"
-    echo -e "   ${GREEN}1.${NC} pg_standard (PostgreSQL)"
-    echo -e "   ${GREEN}2.${NC} prometheus_pg"
-    echo -e "   ${GREEN}3.${NC} grafana_pg"
-    echo -e "   ${GREEN}4.${NC} postgres_exporter"
+    echo -e "Choose container:"
+    echo -e "${YELLOW}[1]${NC} pg_standard (PostgreSQL)"
+    echo -e "${YELLOW}[2]${NC} prometheus_pg"
+    echo -e "${YELLOW}[3]${NC} grafana_pg"
+    echo -e "${YELLOW}[4]${NC} postgres_exporter"
     
-    read -p "Opção (1-4): " -n 1 -r
+    read -p "Option (1-4): " -n 1 -r
     echo
     
     case $REPLY in
@@ -369,70 +362,70 @@ show_logs() {
         2) docker logs --tail 50 prometheus_pg ;;
         3) docker logs --tail 50 grafana_pg ;;
         4) docker logs --tail 50 postgres_exporter ;;
-        *) log "ERROR" "Opção inválida" ;;
+        *) log "ERROR" "Invalid option" ;;
     esac
     
-    read -p "Pressione Enter para continuar..."
+    read -p "Press Enter to continue..."
 }
 
-# Conectar ao PostgreSQL
+# Connect to PostgreSQL
 connect_to_postgres() {
-    echo -e "\n${PURPLE}🔌 CONECTANDO AO POSTGRESQL${NC}"
-    echo "════════════════════════════════════════════════════════════════"
+    echo -e "\n${PURPLE}CONNECTING TO POSTGRESQL${NC}"
+    echo "────────────────────────────────────────────────────────────────────────────────"
     
     if ! is_container_running "pg_standard"; then
-        log "ERROR" "❌ PostgreSQL não está rodando"
-        read -p "Pressione Enter para continuar..."
+        log "ERROR" "PostgreSQL is not running"
+        read -p "Press Enter to continue..."
         return 1
     fi
     
-    log "INFO" "Conectando ao database ${DATABASE_NAME}..."
+    log "INFO" "Connecting to database ${DATABASE_NAME}..."
     docker exec -it pg_standard psql -U postgres -d "${DATABASE_NAME}"
 }
 
 # ================================================================================
-# LOOP PRINCIPAL
+# MAIN LOOP
 # ================================================================================
 
 main() {
-    # Verificar se estamos no diretório correto
+    # Check if we are in the correct directory
     if [[ ! -f "docker-compose.yml" ]]; then
-        log "ERROR" "Arquivo docker-compose.yml não encontrado!"
-        log "ERROR" "Execute este script no diretório /postgre"
+        log "ERROR" "docker-compose.yml file not found!"
+        log "ERROR" "Run this script in the /postgre directory"
         exit 1
     fi
     
-    # Loop principal do menu interativo
+    # Main interactive menu loop
     while true; do
         show_main_menu
         
-        echo -ne "\n${YELLOW}Digite sua opção: ${NC}"
+        echo -ne "\n${CYAN}Select an option [1-8,r,q]: ${NC}"
         read -r choice
         
         case $choice in
             "1"|"start")
                 start_environment
-                read -p "Pressione Enter para continuar..."
+                read -p "Press Enter to continue..."
                 ;;
             "2"|"setup")
                 setup_database
-                read -p "Pressione Enter para continuar..."
+                read -p "Press Enter to continue..."
                 ;;
             "3"|"load-data")
                 load_data
-                read -p "Pressione Enter para continuar..."
+                read -p "Press Enter to continue..."
                 ;;
             "4"|"benchmark")
                 run_benchmark
-                read -p "Pressione Enter para continuar..."
+                read -p "Press Enter to continue..."
                 ;;
             "5"|"stop")
                 stop_environment
-                read -p "Pressione Enter para continuar..."
+                read -p "Press Enter to continue..."
                 ;;
             "6"|"cleanup")
                 cleanup_environment
-                read -p "Pressione Enter para continuar..."
+                read -p "Press Enter to continue..."
                 ;;
             "7"|"logs")
                 show_logs
@@ -441,24 +434,25 @@ main() {
                 connect_to_postgres
                 ;;
             "r"|"refresh")
-                # Apenas atualiza o menu
+                # Just refresh the menu
                 ;;
             "q"|"quit")
-                echo -e "\n${GREEN}👋 Até logo!${NC}"
+                echo -e "\n${GREEN}Thank you for using PostgreSQL Baseline Laboratory!${NC}"
+                echo -e "${CYAN}Bachelor's Thesis Project - Monolithic Database Benchmark${NC}"
                 exit 0
                 ;;
             "")
-                # Enter vazio apenas atualiza
+                # Empty enter just refreshes
                 ;;
             *)
-                log "ERROR" "Opção inválida: $choice"
-                read -p "Pressione Enter para continuar..."
+                log "ERROR" "Invalid option: $choice"
+                read -p "Press Enter to continue..."
                 ;;
         esac
     done
 }
 
-# Verificar se foi chamado com parâmetro (modo não-interativo)
+# Check if called with parameter (non-interactive mode)
 if [ $# -gt 0 ]; then
     case "$1" in
         "start") start_environment ;;
@@ -473,12 +467,12 @@ if [ $# -gt 0 ]; then
             show_monitoring_status
             ;;
         *)
-            echo "Uso: $0 [start|setup|load-data|benchmark|stop|cleanup|status]"
-            echo "Ou execute sem parâmetros para modo interativo"
+            echo "Usage: $0 [start|setup|load-data|benchmark|stop|cleanup|status]"
+            echo "Or run without parameters for interactive mode"
             exit 1
             ;;
     esac
 else
-    # Modo interativo
+    # Interactive mode
     main
 fi
