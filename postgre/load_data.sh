@@ -133,27 +133,35 @@ check_tables() {
 
 check_csv_files() {
     log "INFO" "Checking CSV files..."
+    log "INFO" "CSV directory: $CSV_DIR"
     
     local missing_files=0
     
     # Check each CSV file
     for csv_file in "$COMPANIES_CSV" "$CAMPAIGNS_CSV" "$ADS_CSV" "$SYSTEM_METRICS_CSV"; do
         if [[ ! -f "$csv_file" ]]; then
-            log "ERROR" "❌ CSV file not found: $csv_file"
+            log "ERROR" "CSV file not found: $csv_file"
             missing_files=$((missing_files + 1))
         else
             local lines=$(wc -l < "$csv_file" 2>/dev/null || echo "0")
             local basename=$(basename "$csv_file")
-            log "INFO" "✅ $basename: $csv_file ($lines lines)"
+            local size=$(ls -lh "$csv_file" | awk '{print $5}')
+            log "INFO" "Found $basename: $csv_file ($lines lines, $size)"
+            
+            # Show first few lines for debugging
+            log "INFO" "Preview of $basename (first 3 lines):"
+            head -n 3 "$csv_file" | while IFS= read -r line; do
+                log "INFO" "  $line"
+            done
         fi
     done
     
     if [[ $missing_files -gt 0 ]]; then
-        log "ERROR" "❌ Found $missing_files missing CSV files"
+        log "ERROR" "Found $missing_files missing CSV files"
         return 1
     fi
     
-    log "INFO" "✅ All CSV files found"
+    log "SUCCESS" "All CSV files found and accessible"
     return 0
 }
 
@@ -164,13 +172,14 @@ check_csv_files() {
 load_table_data() {
     local table=$1
     local csv_path=$2
+    local csv_file=$(basename "$csv_path")
     
     if [[ ! -f "$csv_path" ]]; then
         log "WARN" "CSV file not found: $csv_path - skipping $table"
         return 1
     fi
     
-    log "INFO" "Loading data into table '$table' from '$csv_file'..."
+    log "INFO" "Loading data into table '$table' from '$csv_path'..."
     
     # Get CSV info
     local total_lines=$(wc -l < "$csv_path")
@@ -185,34 +194,39 @@ load_table_data() {
     docker cp "$csv_path" "$CONTAINER_NAME:/tmp/$csv_file"
     
     # Load data based on table type
+    local copy_result=0
     case $table in
         "companies")
             docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c "
                 COPY companies(id, name, industry, country, created_at) 
                 FROM '/tmp/$csv_file' 
                 DELIMITER ',' CSV HEADER;
-            " >/dev/null
+            "
+            copy_result=$?
             ;;
         "campaigns") 
             docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c "
                 COPY campaigns(id, company_id, name, budget, status, start_date, end_date, created_at) 
                 FROM '/tmp/$csv_file' 
                 DELIMITER ',' CSV HEADER;
-            " >/dev/null
+            "
+            copy_result=$?
             ;;
         "ads")
             docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c "
                 COPY ads(id, campaign_id, company_id, title, content, clicks, impressions, cost, created_at) 
                 FROM '/tmp/$csv_file' 
                 DELIMITER ',' CSV HEADER;
-            " >/dev/null
+            "
+            copy_result=$?
             ;;
         "system_metrics")
             docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c "
                 COPY system_metrics(id, metric_name, metric_value, collected_at) 
                 FROM '/tmp/$csv_file' 
                 DELIMITER ',' CSV HEADER;
-            " >/dev/null
+            "
+            copy_result=$?
             ;;
         *)
             log "ERROR" "Unknown table: $table"
@@ -220,8 +234,18 @@ load_table_data() {
             ;;
     esac
     
+    # Check if the COPY command succeeded
+    if [[ $copy_result -eq 0 ]]; then
+        log "INFO" "COPY command completed successfully for $table"
+    else
+        log "ERROR" "COPY command failed for $table (exit code: $copy_result)"
+        return 1
+    fi
+    
     # Verify loaded data
     local loaded_count=$(docker exec $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -t -c "SELECT COUNT(*) FROM $table;" | tr -d ' ')
+    
+    log "INFO" "Verification: Expected $data_lines records, found $loaded_count in '$table'"
     
     if [[ $loaded_count -eq $data_lines ]]; then
         log "SUCCESS" "Successfully loaded $loaded_count records into '$table'"
@@ -238,7 +262,7 @@ load_table_data() {
 load_all_data() {
     log "INFO" "Starting data loading process..."
     
-    local total_tables=${#CSV_FILES[@]}
+    local total_tables=4
     local loaded_tables=0
     local failed_tables=0
     
