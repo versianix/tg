@@ -1,18 +1,11 @@
 #!/bin/bash
 
-# ██████╗ ███████╗ ██████╗██╗  ██╗███████╗███╗   ███╗ █████╗ 
-# ██╔════╝██╔════╝██╔════╝██║  ██║██╔════╝████╗ ████║██╔══██╗
-# ███████╗██║     ██║     ███████║█████╗  ██╔████╔██║███████║
-# ╚════██║██║     ██║     ██╔══██║██╔══╝  ██║╚██╔╝██║██╔══██║
-# ███████║╚██████╗╚██████╗██║  ██║███████╗██║ ╚═╝ ██║██║  ██║
-# ╚══════╝ ╚═════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝
-#
-# 🏗️ SCHEMA MANAGER: Gerenciador Inteligente de Schemas
-# Objetivo: Criar tabelas e configurar sharding baseado em arquivos YAML
+# SCHEMA MANAGER: Intelligent Schema Management System
+# Purpose: Create tables and configure sharding based on YAML files
 
 set -euo pipefail
 
-# Cores
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -22,13 +15,13 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Configurações
+# Configuration
 COMPOSE_PROJECT_NAME="citus"
 CONFIG_DIR="config"
 SCENARIOS_DIR="$CONFIG_DIR/scenarios"
-COORDINATOR_CONTAINER=""  # Será detectado dinamicamente
+COORDINATOR_CONTAINER=""  # Will be detected dynamically
 
-# Função para logs formatados
+# Function for formatted logging
 log() {
     local level="$1"
     shift
@@ -36,20 +29,20 @@ log() {
     local timestamp=$(date '+%H:%M:%S')
     
     case $level in
-        "INFO")  echo -e "${CYAN}[$timestamp] ℹ️  $message${NC}" ;;
-        "SUCCESS") echo -e "${GREEN}[$timestamp] ✅ $message${NC}" ;;
-        "WARNING") echo -e "${YELLOW}[$timestamp] ⚠️  $message${NC}" ;;
-        "ERROR") echo -e "${RED}[$timestamp] ❌ $message${NC}" ;;
-        "DEBUG") echo -e "${PURPLE}[$timestamp] 🔍 $message${NC}" ;;
+        "INFO")  echo -e "${CYAN}[$timestamp] INFO: $message${NC}" ;;
+        "SUCCESS") echo -e "${GREEN}[$timestamp] SUCCESS: $message${NC}" ;;
+        "WARNING") echo -e "${YELLOW}[$timestamp] WARNING: $message${NC}" ;;
+        "ERROR") echo -e "${RED}[$timestamp] ERROR: $message${NC}" ;;
+        "DEBUG") echo -e "${PURPLE}[$timestamp] DEBUG: $message${NC}" ;;
     esac
 }
 
-# Função para detectar arquitetura ativa
+# Function to detect active architecture
 detect_architecture() {
-    # Verifica se há containers Patroni rodando
+    # Check if Patroni containers are running
     if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator1$"; then
         echo "patroni"
-    # Verifica se há container simples rodando
+    # Check if simple container is running
     elif docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
         echo "simple"
     else
@@ -57,7 +50,7 @@ detect_architecture() {
     fi
 }
 
-# Função para detectar coordinator baseado na arquitetura
+# Function to detect coordinator based on architecture
 detect_coordinator() {
     local arch=$(detect_architecture)
     
@@ -69,15 +62,15 @@ detect_coordinator() {
             detect_simple_coordinator
             ;;
         *)
-            log "ERROR" "Nenhuma arquitetura Citus detectada"
+            log "ERROR" "No Citus architecture detected"
             return 1
             ;;
     esac
 }
 
-# Função para detectar coordinator líder via API do Patroni
+# Function to detect Patroni leader coordinator via API
 detect_patroni_leader() {
-    log "INFO" "Detectando coordinator líder (Patroni)..."
+    log "INFO" "Detecting leader coordinator (Patroni)..."
     
     # Try to detect leader for up to 1 minute 
     local max_attempts=120  # 60 seconds (120 * 0.5s)
@@ -97,7 +90,7 @@ detect_patroni_leader() {
             role=$(docker exec "$container_name" curl -s localhost:8008/ 2>/dev/null | grep -o '"role":"[^"]*"' | cut -d'"' -f4 2>/dev/null || echo "")
             if [[ "$role" == "master" ]]; then
                 COORDINATOR_CONTAINER="$container_name"
-                log "SUCCESS" "Coordinator líder detectado: $coord"
+                log "SUCCESS" "Leader coordinator detected: $coord"
                 return 0
             fi
             
@@ -106,7 +99,7 @@ detect_patroni_leader() {
                 postgres_role=$(docker exec "$container_name" psql -U postgres -t -c "SELECT CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'master' END;" 2>/dev/null | tr -d ' ')
                 if [[ "$postgres_role" == "master" ]]; then
                     COORDINATOR_CONTAINER="$container_name"
-                    log "SUCCESS" "Coordinator líder detectado: $coord"
+                    log "SUCCESS" "Leader coordinator detected: $coord"
                     return 0
                 fi
             fi
@@ -116,158 +109,158 @@ detect_patroni_leader() {
         attempt=$((attempt + 1))
     done
 
-    log "WARNING" "Não foi possível detectar líder. Usando coordinator1 (fallback)"
+    log "WARNING" "Could not detect leader. Using coordinator1 (fallback)"
     COORDINATOR_CONTAINER="citus_coordinator1"
     return 1
 }
 
-# Função para detectar coordinator simples
+# Function to detect simple coordinator
 detect_simple_coordinator() {
-    log "INFO" "Detectando coordinator (Arquitetura Simples)..."
+    log "INFO" "Detecting coordinator (Simple Architecture)..."
     
     if docker ps --format "{{.Names}}" | grep -q "^citus_coordinator$"; then
         COORDINATOR_CONTAINER="citus_coordinator"
-        log "SUCCESS" "Coordinator detectado: citus_coordinator"
+        log "SUCCESS" "Coordinator detected: citus_coordinator"
         return 0
     else
-        log "ERROR" "Container citus_coordinator não encontrado"
+        log "ERROR" "Container citus_coordinator not found"
         return 1
     fi
 }
 
-# Função para verificar dependências
+# Function to check dependencies
 check_dependencies() {
-    log "INFO" "Verificando dependências..."
+    log "INFO" "Checking dependencies..."
     
-    # Verificar se yq está instalado (para parsing YAML)
+    # Check if yq is installed (for YAML parsing)
     if ! command -v yq &> /dev/null; then
-        log "WARNING" "yq não encontrado. Tentando instalar..."
+        log "WARNING" "yq not found. Attempting to install..."
         if command -v brew &> /dev/null; then
             brew install yq
         else
-            log "ERROR" "Por favor, instale yq: https://github.com/mikefarah/yq"
+            log "ERROR" "Please install yq: https://github.com/mikefarah/yq"
             log "INFO" "macOS: brew install yq"
             log "INFO" "Linux: wget -qO- https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 > /usr/local/bin/yq && chmod +x /usr/local/bin/yq"
             return 1
         fi
     fi
     
-    # Verificar Docker
+    # Check Docker
     if ! docker ps > /dev/null 2>&1; then
-        log "ERROR" "Docker não está rodando ou não está acessível"
+        log "ERROR" "Docker is not running or not accessible"
         return 1
     fi
     
-    # Detectar e verificar coordinator baseado na arquitetura
+    # Detect and verify coordinator based on architecture
     detect_coordinator || return 1
     
-    # Verificar se cluster está rodando
+    # Check if cluster is running
     if ! docker exec "$COORDINATOR_CONTAINER" pg_isready -U postgres > /dev/null 2>&1; then
-        log "ERROR" "Cluster Citus não está rodando ou coordinator líder não está acessível"
+        log "ERROR" "Citus cluster is not running or leader coordinator is not accessible"
         return 1
     fi
     
-    log "SUCCESS" "Todas as dependências verificadas"
+    log "SUCCESS" "All dependencies verified"
 }
 
-# Função para listar cenários disponíveis
+# Function to list available scenarios
 list_scenarios() {
-    log "INFO" "Cenários disponíveis:"
+    log "INFO" "Available scenarios:"
     echo
     
     for scenario_file in "$SCENARIOS_DIR"/*.yml; do
         if [[ -f "$scenario_file" ]]; then
             local scenario_name=$(basename "$scenario_file" .yml)
-            local description=$(yq eval '.scenario.description // "Sem descrição"' "$scenario_file")
+            local description=$(yq eval '.scenario.description // "No description"' "$scenario_file")
             local complexity=$(yq eval '.scenario.complexity // "unknown"' "$scenario_file")
             
             case $complexity in
-                "beginner") complexity_icon="🟢" ;;
-                "intermediate") complexity_icon="🟡" ;;
-                "advanced") complexity_icon="🔴" ;;
-                *) complexity_icon="⚪" ;;
+                "beginner") complexity_level="[BASIC]" ;;
+                "intermediate") complexity_level="[INTERMEDIATE]" ;;
+                "advanced") complexity_level="[ADVANCED]" ;;
+                *) complexity_level="[UNKNOWN]" ;;
             esac
             
-            echo -e "  ${complexity_icon} ${BOLD}${scenario_name}${NC}: $description"
+            echo -e "  ${complexity_level} ${BOLD}${scenario_name}${NC}: $description"
         fi
     done
     echo
 }
 
-# Função para parsing do arquivo YAML
+# Function to parse YAML configuration file
 parse_yaml_config() {
     local config_file="$1"
     
-    log "INFO" "Analisando configuração: $config_file"
+    log "INFO" "Parsing configuration: $config_file"
     
-    # Verificar se arquivo existe
+    # Check if file exists
     if [[ ! -f "$config_file" ]]; then
-        log "ERROR" "Arquivo de configuração não encontrado: $config_file"
+        log "ERROR" "Configuration file not found: $config_file"
         return 1
     fi
     
-    # Extrair nome do banco
+    # Extract database name
     DB_NAME=$(yq eval '.database.name // "test_db"' "$config_file")
     log "DEBUG" "Database: $DB_NAME"
     
-    # Verificar se tem import de tabelas
+    # Check if there's a table import
     local import_file=$(yq eval '.import // ""' "$config_file")
     if [[ -n "$import_file" && "$import_file" != "null" ]]; then
-        # Resolver caminho relativo
+        # Resolve relative path
         import_file="$CONFIG_DIR/$import_file"
         if [[ ! -f "$import_file" ]]; then
             import_file="$CONFIG_DIR/tables.yml"  # Fallback
         fi
-        log "DEBUG" "Importando definições de: $import_file"
+        log "DEBUG" "Importing definitions from: $import_file"
         TABLES_CONFIG="$import_file"
     else
         TABLES_CONFIG="$config_file"
     fi
 }
 
-# Função para criar database
+# Function to create database
 create_database() {
     local db_name="$1"
     
-    log "INFO" "Verificando database: $db_name"
+    log "INFO" "Checking database: $db_name"
     
-    # Verificar se database já existe
+    # Check if database already exists
     if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt | cut -d \| -f 1 | grep -qw "$db_name"; then
-        log "INFO" "Database '$db_name' já existe. Reutilizando..."
+        log "INFO" "Database '$db_name' already exists. Reusing..."
     else
-        log "INFO" "Criando database: $db_name"
+        log "INFO" "Creating database: $db_name"
         docker exec "$COORDINATOR_CONTAINER" psql -U postgres -c "CREATE DATABASE $db_name;"
     fi
     
-    # Criar extensão Citus (se não existir)
+    # Create Citus extension (if it doesn't exist)
     docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$db_name" -c "CREATE EXTENSION IF NOT EXISTS citus;"
     
-    log "SUCCESS" "Database '$db_name' pronto com extensão Citus"
+    log "SUCCESS" "Database '$db_name' ready with Citus extension"
 }
 
-# Função para criar uma tabela baseada na configuração YAML
+# Function to create a table based on YAML configuration
 create_table() {
     local table_name="$1"
     local config_file="$2"
     
-    log "INFO" "Criando tabela: $table_name"
+    log "INFO" "Creating table: $table_name"
     
-    # Verificar se tabela já existe
+    # Check if table already exists
     if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "\dt" | grep -qw "$table_name"; then
-        log "WARNING" "Tabela '$table_name' já existe. Pulando criação..."
+        log "WARNING" "Table '$table_name' already exists. Skipping creation..."
         return 0
     fi
     
-    # Extrair configuração da tabela
+    # Extract table configuration
     local table_type=$(yq eval ".tables.${table_name}.type" "$config_file")
     local description=$(yq eval ".tables.${table_name}.description" "$config_file")
     
-    log "DEBUG" "Tipo: $table_type | Descrição: $description"
+    log "DEBUG" "Type: $table_type | Description: $description"
     
-    # Construir DDL
+    # Build DDL
     local ddl="CREATE TABLE $table_name ("
     
-    # Adicionar colunas
+    # Add columns
     local columns_count=$(yq eval ".tables.${table_name}.columns | length" "$config_file")
     for ((i=0; i<columns_count; i++)); do
         local col_name=$(yq eval ".tables.${table_name}.columns[$i].name" "$config_file")
@@ -277,33 +270,33 @@ create_table() {
         ddl="$ddl\n    $col_name $col_type"
         [[ $i -lt $((columns_count-1)) ]] && ddl="$ddl,"
         
-        log "DEBUG" "  Coluna: $col_name ($col_type)"
+        log "DEBUG" "  Column: $col_name ($col_type)"
     done
     
-    # Verificar chave primária personalizada
+    # Check for custom primary key
     local pk=$(yq eval ".tables.${table_name}.primary_key // []" "$config_file")
     if [[ "$pk" != "[]" && "$pk" != "null" ]]; then
         local pk_cols=$(yq eval ".tables.${table_name}.primary_key | join(\", \")" "$config_file")
         ddl="$ddl,\n    PRIMARY KEY ($pk_cols)"
-        log "DEBUG" "  Chave primária: $pk_cols"
+        log "DEBUG" "  Primary key: $pk_cols"
     fi
     
     ddl="$ddl\n);"
     
-    # Executar DDL
-    log "DEBUG" "Executando DDL para $table_name"
+    # Execute DDL
+    log "DEBUG" "Executing DDL for $table_name"
     echo -e "$ddl" | docker exec -i "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME"
     
-    # Configurar distribuição
+    # Configure distribution
     configure_table_distribution "$table_name" "$config_file"
     
-    # Criar índices
+    # Create indexes
     create_table_indexes "$table_name" "$config_file"
     
-    log "SUCCESS" "Tabela '$table_name' criada com sucesso"
+    log "SUCCESS" "Table '$table_name' created successfully"
 }
 
-# Função para configurar distribuição da tabela
+# Function to configure table distribution
 configure_table_distribution() {
     local table_name="$1"
     local config_file="$2"
@@ -312,7 +305,7 @@ configure_table_distribution() {
     
     case $table_type in
         "reference")
-            log "INFO" "Configurando '$table_name' como tabela de referência"
+            log "INFO" "Configuring '$table_name' as reference table"
             docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" \
                 -c "SELECT create_reference_table('$table_name');"
             ;;
@@ -321,31 +314,31 @@ configure_table_distribution() {
             local shard_key=$(yq eval ".tables.${table_name}.shard_key" "$config_file")
             local shard_count=$(yq eval ".tables.${table_name}.shard_count // 4" "$config_file")
             
-            # Verificar co-localização antes de criar
+            # Check for co-location before creating
             local colocated_with=$(yq eval ".tables.${table_name}.colocated_with // \"\"" "$config_file")
             
             if [[ -n "$colocated_with" && "$colocated_with" != "null" ]]; then
-                log "INFO" "Configurando '$table_name' como tabela distribuída co-localizada com '$colocated_with'"
+                log "INFO" "Configuring '$table_name' as distributed table co-located with '$colocated_with'"
                 docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" \
                     -c "SELECT create_distributed_table('$table_name', '$shard_key', colocate_with => '$colocated_with');"
             else
-                log "INFO" "Configurando '$table_name' como tabela distribuída (shard_key: $shard_key, shards: $shard_count)"
+                log "INFO" "Configuring '$table_name' as distributed table (shard_key: $shard_key, shards: $shard_count)"
                 docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" \
                     -c "SELECT create_distributed_table('$table_name', '$shard_key', shard_count => $shard_count);"
             fi
             ;;
             
         "local")
-            log "INFO" "Mantendo '$table_name' como tabela local (não distribuída)"
+            log "INFO" "Keeping '$table_name' as local table (not distributed)"
             ;;
             
         *)
-            log "WARNING" "Tipo de tabela desconhecido: $table_type. Mantendo como local"
+            log "WARNING" "Unknown table type: $table_type. Keeping as local"
             ;;
     esac
 }
 
-# Função para criar índices
+# Function to create indexes
 create_table_indexes() {
     local table_name="$1"
     local config_file="$2"
@@ -353,13 +346,13 @@ create_table_indexes() {
     local indexes_count=$(yq eval ".tables.${table_name}.indexes | length" "$config_file" 2>/dev/null || echo "0")
     
     if [[ "$indexes_count" -gt 0 ]]; then
-        log "INFO" "Criando índices para '$table_name'"
+        log "INFO" "Creating indexes for '$table_name'"
         
         for ((i=0; i<indexes_count; i++)); do
             local idx_name=$(yq eval ".tables.${table_name}.indexes[$i].name" "$config_file")
             local idx_columns=$(yq eval ".tables.${table_name}.indexes[$i].columns | join(\", \")" "$config_file")
             
-            log "DEBUG" "  Índice: $idx_name ($idx_columns)"
+            log "DEBUG" "  Index: $idx_name ($idx_columns)"
             
             docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" \
                 -c "CREATE INDEX IF NOT EXISTS $idx_name ON $table_name ($idx_columns);"
@@ -367,96 +360,236 @@ create_table_indexes() {
     fi
 }
 
-# Função principal para criar schema completo
+# Main function to create complete schema
 create_schema() {
     local scenario="$1"
     local config_file="$SCENARIOS_DIR/${scenario}.yml"
     
-    log "INFO" "🚀 Iniciando criação de schema para cenário: $scenario"
+    log "INFO" "Starting schema creation for scenario: $scenario"
     
-    # Verificar dependências
+    # Check dependencies
     check_dependencies || return 1
     
-    # Parse da configuração
+    # Parse configuration
     parse_yaml_config "$config_file" || return 1
     
-    # Criar database
+    # Create database
     create_database "$DB_NAME"
     
-    # Obter lista de tabelas na ordem correta
+    # Get table list in correct order
     local tables=$(yq eval '.tables | keys | .[]' "$TABLES_CONFIG")
     
-    log "INFO" "Tabelas a serem criadas: $(echo $tables | tr '\n' ' ')"
+    log "INFO" "Tables to be created: $(echo $tables | tr '\n' ' ')"
     
-    # Criar tabelas em ordem (referência primeiro, depois distribuídas)
+    # Create tables in order (reference first, then distributed)
     echo "$tables" | while read -r table; do
         [[ -n "$table" && "$table" != "null" ]] && create_table "$table" "$TABLES_CONFIG"
     done
     
-    # Mostrar resumo final
+    # Show final summary
     show_schema_summary
     
-    log "SUCCESS" "🎉 Schema criado com sucesso!"
+    log "SUCCESS" "Schema created successfully"
 }
 
-# Função para mostrar resumo do schema
+# Function to show schema summary
 show_schema_summary() {
-    log "INFO" "📊 Resumo do Schema"
+    log "INFO" "Schema Summary"
     
-    echo -e "\n${CYAN}Tabelas criadas:${NC}"
+    echo -e "\n${CYAN}Created tables:${NC}"
     docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "
     SELECT 
         schemaname,
         tablename,
         CASE 
-            WHEN tablename IN (SELECT logicalrelid::regclass::text FROM pg_dist_partition) 
-            THEN 'Distribuída'
             WHEN tablename IN (SELECT logicalrelid::regclass::text FROM pg_dist_partition WHERE partmethod = 'n')
-            THEN 'Referência'  
+            THEN 'Reference'
+            WHEN tablename IN (SELECT logicalrelid::regclass::text FROM pg_dist_partition WHERE partmethod = 'h')
+            THEN 'Distributed'
             ELSE 'Local'
-        END as tipo
+        END as type
     FROM pg_tables 
-    WHERE schemaname = 'public'
+    WHERE schemaname = 'public' 
+      AND tablename NOT LIKE 'pgbench_%'
+    ORDER BY 
+        CASE 
+            WHEN tablename IN (SELECT logicalrelid::regclass::text FROM pg_dist_partition WHERE partmethod = 'n') THEN 1
+            WHEN tablename IN (SELECT logicalrelid::regclass::text FROM pg_dist_partition WHERE partmethod = 'h') THEN 2
+            ELSE 3
+        END, tablename;
+    "
+    
+    echo -e "\n${CYAN}Shard distribution:${NC}"
+    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "
+    SELECT 
+        p.logicalrelid::regclass as table_name,
+        CASE 
+            WHEN p.partmethod = 'n' THEN 'Reference Table'
+            ELSE COUNT(s.shardid)::text
+        END as shards,
+        CASE 
+            WHEN p.partmethod = 'n' THEN 'N/A'
+            WHEN p.partmethod = 'h' THEN 'company_id'
+            ELSE 'Unknown'
+        END as shard_key,
+        CASE 
+            WHEN p.partmethod = 'n' THEN 'Reference'
+            WHEN p.partmethod = 'h' THEN 'Hash Distributed'
+            ELSE 'Unknown'
+        END as distribution_method,
+        p.colocationid as colocation_group
+    FROM pg_dist_partition p
+    LEFT JOIN pg_dist_shard s ON s.logicalrelid = p.logicalrelid
+    WHERE p.logicalrelid::regclass::text NOT LIKE 'pgbench_%'
+    GROUP BY p.logicalrelid, p.partkey, p.partmethod, p.colocationid
+    ORDER BY 
+        CASE p.partmethod WHEN 'n' THEN 1 WHEN 'h' THEN 2 ELSE 3 END,
+        p.logicalrelid::regclass;
+    " 2>/dev/null || echo -e "    ${YELLOW}No Citus distributed tables found${NC}"
+}
+
+# Function to clean schema (drop all user tables)
+clean_schema() {
+    log "INFO" "Schema cleanup - removing all user tables"
+    
+    # Check dependencies
+    check_dependencies || return 1
+    
+    # Detect database name (try citus_platform first, then citus)
+    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "citus_platform"; then
+        DB_NAME="citus_platform"
+    elif docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "citus"; then
+        DB_NAME="citus"
+    else
+        log "ERROR" "Cannot find Citus database (citus_platform or citus)"
+        return 1
+    fi
+    
+    log "INFO" "Using database: $DB_NAME"
+    
+    echo -e "${YELLOW}WARNING: This will drop all user tables in database '$DB_NAME'${NC}"
+    echo -e "${YELLOW}Tables to be dropped:${NC}"
+    
+    # Show tables that will be dropped
+    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "
+    SELECT tablename FROM pg_tables 
+    WHERE schemaname = 'public' 
+    AND tablename NOT LIKE 'pg_%' 
+    AND tablename NOT LIKE 'citus_%'
     ORDER BY tablename;
     "
     
-    echo -e "\n${CYAN}Distribuição de shards:${NC}"
-    docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "
-    SELECT 
-        p.logicalrelid::regclass as tabela,
-        COUNT(s.shardid) as shards,
-        CASE 
-            WHEN p.partkey IS NULL THEN 'N/A (tabela de referência)'
-            ELSE 'company_id'  -- Assumindo que todas usam company_id como shard key
-        END as shard_key
-    FROM pg_dist_shard s
-    JOIN pg_dist_partition p ON s.logicalrelid = p.logicalrelid
-    GROUP BY p.logicalrelid, p.partkey
-    ORDER BY p.logicalrelid;
-    " 2>/dev/null || log "DEBUG" "Nenhuma tabela distribuída encontrada"
-}
-
-# Função para modo interativo
-interactive_mode() {
-    echo -e "${PURPLE}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║              🏗️  SCHEMA MANAGER INTERATIVO            ║${NC}"
-    echo -e "${PURPLE}╚══════════════════════════════════════════════════════╝${NC}"
     echo
+    echo -n -e "${CYAN}Do you want to continue? [y/N]: ${NC}"
+    read -r confirm
     
-    list_scenarios
-    
-    echo -n -e "${CYAN}Escolha um cenário para criar: ${NC}"
-    read -r scenario
-    
-    if [[ -f "$SCENARIOS_DIR/${scenario}.yml" ]]; then
-        create_schema "$scenario"
+    if [[ $confirm =~ ^[Yy]$ ]]; then
+        log "INFO" "Dropping all user tables..."
+        
+        # Drop all user tables (this handles distributed, reference, and local tables)
+        docker exec "$COORDINATOR_CONTAINER" psql -U postgres -d "$DB_NAME" -c "
+        DO \$\$
+        DECLARE
+            rec RECORD;
+        BEGIN
+            FOR rec IN 
+                SELECT tablename 
+                FROM pg_tables 
+                WHERE schemaname = 'public' 
+                AND tablename NOT LIKE 'pg_%' 
+                AND tablename NOT LIKE 'citus_%'
+            LOOP
+                EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(rec.tablename) || ' CASCADE';
+                RAISE NOTICE 'Dropped table: %', rec.tablename;
+            END LOOP;
+        END
+        \$\$;
+        "
+        
+        log "SUCCESS" "All user tables dropped successfully"
     else
-        log "ERROR" "Cenário '$scenario' não encontrado"
-        return 1
+        log "INFO" "Schema cleanup cancelled"
     fi
 }
 
-# Função principal
+# Function for interactive mode
+interactive_mode() {
+    while true; do
+        echo -e "${PURPLE}=====================================================${NC}"
+        echo -e "${PURPLE}           INTERACTIVE SCHEMA MANAGER               ${NC}"
+        echo -e "${PURPLE}=====================================================${NC}"
+        echo
+        
+        echo -e "${BOLD}Available options:${NC}"
+        echo
+        echo -e "  ${CYAN}1${NC} - List available scenarios"
+        echo -e "  ${CYAN}2${NC} - Create schema from scenario"
+        echo -e "  ${CYAN}3${NC} - Show current schema summary"
+        echo -e "  ${CYAN}4${NC} - Clean schema (drop all tables)"
+        echo -e "  ${CYAN}0${NC} - Return to main menu"
+        echo
+        
+        echo -n -e "${CYAN}Choose an option [0-4]: ${NC}"
+        read -r choice
+        
+        case $choice in
+            1)
+                list_scenarios
+                echo "Press Enter to continue..."
+                read -r
+                ;;
+            2)
+                echo
+                list_scenarios
+                echo -n -e "${CYAN}Choose a scenario to create: ${NC}"
+                read -r scenario
+                
+                if [[ -f "$SCENARIOS_DIR/${scenario}.yml" ]]; then
+                    create_schema "$scenario"
+                    echo "Press Enter to continue..."
+                    read -r
+                else
+                    log "ERROR" "Scenario '$scenario' not found"
+                    echo "Press Enter to continue..."
+                    read -r
+                fi
+                ;;
+            3)
+                # Check if we can show summary
+                if check_dependencies 2>/dev/null; then
+                    # Detect database name for summary
+                    if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "citus_platform"; then
+                        DB_NAME="citus_platform"
+                    elif docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "citus"; then
+                        DB_NAME="citus"
+                    else
+                        log "ERROR" "Cannot find Citus database"
+                    fi
+                    show_schema_summary
+                else
+                    log "ERROR" "Cannot connect to cluster to show summary"
+                fi
+                echo "Press Enter to continue..."
+                read -r
+                ;;
+            4)
+                clean_schema
+                echo "Press Enter to continue..."
+                read -r
+                ;;
+            0)
+                log "INFO" "Returning to main menu..."
+                return 0
+                ;;
+            *)
+                log "ERROR" "Invalid option: $choice"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Main function
 main() {
     case "${1:-}" in
         "list"|"ls")
@@ -466,8 +599,28 @@ main() {
             if [[ -n "${2:-}" ]]; then
                 create_schema "$2"
             else
-                log "ERROR" "Uso: $0 create <cenario>"
+                log "ERROR" "Usage: $0 create <scenario>"
                 list_scenarios
+                return 1
+            fi
+            ;;
+        "clean")
+            clean_schema
+            ;;
+        "summary")
+            if check_dependencies 2>/dev/null; then
+                # Detect database name for summary
+                if docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "citus_platform"; then
+                    DB_NAME="citus_platform"
+                elif docker exec "$COORDINATOR_CONTAINER" psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "citus"; then
+                    DB_NAME="citus"
+                else
+                    log "ERROR" "Cannot find Citus database (citus_platform or citus)"
+                    return 1
+                fi
+                show_schema_summary
+            else
+                log "ERROR" "Cannot connect to cluster"
                 return 1
             fi
             ;;
@@ -475,29 +628,33 @@ main() {
             interactive_mode
             ;;
         "help"|"-h"|"--help")
-            echo -e "${BOLD}Schema Manager - Gerenciador de Schemas Citus${NC}"
+            echo -e "${BOLD}Schema Manager - Citus Schema Management System${NC}"
             echo
-            echo "Uso:"
-            echo "  $0 [comando] [opções]"
+            echo "Usage:"
+            echo "  $0 [command] [options]"
             echo
-            echo "Comandos:"
-            echo "  list, ls              Lista cenários disponíveis"
-            echo "  create <cenario>      Cria schema para o cenário especificado"
-            echo "  interactive           Modo interativo (padrão)"
-            echo "  help                  Mostra esta ajuda"
+            echo "Commands:"
+            echo "  list, ls              List available scenarios"
+            echo "  create <scenario>     Create schema for specified scenario"
+            echo "  clean                 Clean schema (drop all user tables)"
+            echo "  summary               Show current schema summary"
+            echo "  interactive           Interactive mode (default)"
+            echo "  help                  Show this help"
             echo
-            echo "Exemplos:"
+            echo "Examples:"
             echo "  $0 list"
             echo "  $0 create adtech"
+            echo "  $0 clean"
+            echo "  $0 summary"
             echo "  $0 interactive"
             ;;
         *)
-            log "ERROR" "Comando desconhecido: $1"
-            echo "Use '$0 help' para ver comandos disponíveis"
+            log "ERROR" "Unknown command: $1"
+            echo "Use '$0 help' to see available commands"
             return 1
             ;;
     esac
 }
 
-# Executar função principal com argumentos
+# Execute main function with arguments
 main "$@"
