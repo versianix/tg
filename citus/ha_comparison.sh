@@ -54,30 +54,27 @@ log() {
     local message="$2"
     local timestamp
     timestamp=$(date '+%H:%M:%S')
-    
     case "$level" in
         "INFO")  echo -e "${CYAN}[${timestamp}]${NC} ${message}" ;;
-        "WARN")  echo -e "${YELLOW}[${timestamp}] ⚠️${NC}  ${message}" ;;
-        "ERROR") echo -e "${RED}[${timestamp}] ❌${NC} ${message}" ;;
-        "SUCCESS") echo -e "${GREEN}[${timestamp}] ✅${NC} ${message}" ;;
+        "WARN")  echo -e "${YELLOW}[${timestamp}] WARNING:${NC}  ${message}" ;;
+        "ERROR") echo -e "${RED}[${timestamp}] ERROR:${NC} ${message}" ;;
+        "SUCCESS") echo -e "${GREEN}[${timestamp}] SUCCESS:${NC} ${message}" ;;
     esac
 }
 
 print_header() {
     local title="$1"
     echo
-    echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║$(printf "%62s" | tr ' ' ' ')║${NC}"
-    echo -e "${PURPLE}║$(printf "%*s" $((31 + ${#title}/2)) "$title")$(printf "%*s" $((31 - ${#title}/2)) "")║${NC}"
-    echo -e "${PURPLE}║$(printf "%62s" | tr ' ' ' ')║${NC}"
-    echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${PURPLE}================================================================${NC}"
+    printf "${PURPLE}%s${NC}\n" "$(printf "%*s" $((31 + ${#title}/2)) "$title")"
+    echo -e "${PURPLE}================================================================${NC}"
     echo
 }
 
 print_section() {
     local title="$1"
     echo
-    echo -e "${BLUE}🎯 ${title}${NC}"
+    echo -e "${BLUE}${title}${NC}"
     echo -e "${BLUE}$(printf '=%.0s' $(seq 1 $((${#title} + 3))))${NC}"
 }
 
@@ -127,15 +124,21 @@ detect_current_architecture() {
 }
 
 get_patroni_leader() {
-    # Check which coordinator is currently the Patroni leader
-    if container_healthy "$PATRONI_COORDINATOR1" && docker exec "$PATRONI_COORDINATOR1" curl -s localhost:8008/ 2>/dev/null | grep -q '"role": "master"'; then
-        echo "$PATRONI_COORDINATOR1"
-    elif container_healthy "$PATRONI_COORDINATOR2" && docker exec "$PATRONI_COORDINATOR2" curl -s localhost:8008/ 2>/dev/null | grep -q '"role": "master"'; then
-        echo "$PATRONI_COORDINATOR2"
-    elif container_healthy "$PATRONI_COORDINATOR3" && docker exec "$PATRONI_COORDINATOR3" curl -s localhost:8008/ 2>/dev/null | grep -q '"role": "master"'; then
-        echo "$PATRONI_COORDINATOR3"
+    # Use the optimized detect_current_leader function
+    local leader=$(detect_current_leader)
+    if [ -n "$leader" ]; then
+        echo "$leader"
     else
-        echo "$PATRONI_COORDINATOR1"  # fallback
+        # Fallback - return the first healthy container
+        if container_healthy "$PATRONI_COORDINATOR1"; then
+            echo "$PATRONI_COORDINATOR1"
+        elif container_healthy "$PATRONI_COORDINATOR2"; then
+            echo "$PATRONI_COORDINATOR2"  
+        elif container_healthy "$PATRONI_COORDINATOR3"; then
+            echo "$PATRONI_COORDINATOR3"
+        else
+            echo "$PATRONI_COORDINATOR1"  # ultimate fallback
+        fi
     fi
 }
 
@@ -183,37 +186,91 @@ detect_current_leader() {
         "citus_coordinator3"
     )
     
+    # Method 1: Try Patroni API first (faster)
     for container in "${coordinator_containers[@]}"; do
-        if docker exec "$container" curl -s http://localhost:8008/ 2>/dev/null | grep -q '"role": "master"'; then
-            echo "$container"
-            return 0
+        if container_running "$container"; then
+            # Check Patroni API - remove aggressive timeouts that cause failures
+            local patroni_response
+            patroni_response=$(docker exec "$container" curl -s http://localhost:8008/ 2>/dev/null || echo "")
+            
+            # Check for master role with flexible spacing around colon
+            if echo "$patroni_response" | grep -q '"role"[[:space:]]*:[[:space:]]*"master"'; then
+                echo "$container"
+                return 0
+            fi
         fi
     done
+    
+    # Method 2: Fallback to PostgreSQL direct check
+    for container in "${coordinator_containers[@]}"; do
+        if container_running "$container"; then
+            # Check if PostgreSQL is master (not in recovery)
+            local recovery_status
+            recovery_status=$(timeout 3 docker exec "$container" psql -U postgres -t -c "SELECT pg_is_in_recovery();" 2>/dev/null | tr -d ' \n' || echo "t")
+            
+            if [[ "$recovery_status" == "f" ]]; then
+                echo "$container"
+                return 0
+            fi
+        fi
+    done
+    
     echo ""
 }
 
 # Wait for new leader election after failover
 wait_for_leader_election() {
-    local max_wait=60  # Maximum wait time in seconds
+    local max_wait=30  # Reduced since we fixed the detection issue
     local wait_time=0
-    local check_interval=2
+    local check_interval=2  # Balance between responsiveness and system load
+    local failed_leader="$1"  # Pass the failed leader to exclude it
     
-    echo "⏳ Waiting for Patroni leader election..."
+    log "INFO" "Waiting for Patroni leader election (excluding: ${failed_leader:-none})..."
+    
+    # First, wait a bit for Patroni to detect the failure
+    sleep 2
     
     while [ $wait_time -lt $max_wait ]; do
         local new_leader=$(detect_current_leader)
-        if [ -n "$new_leader" ]; then
-            echo "🎯 New leader elected: ${new_leader}"
-            sleep 3  # Give new leader time to fully initialize
+        
+        # Ensure we have a different leader (not the failed one)
+        if [ -n "$new_leader" ] && [ "$new_leader" != "$failed_leader" ]; then
+            log "SUCCESS" "New leader elected: ${new_leader}"
+            
+            # Verify the new leader is actually responding to queries
+            log "INFO" "Verifying new leader is ready for queries..."
+            local attempts=0
+            while [ $attempts -lt 10 ]; do
+                if timeout 5 docker exec "$new_leader" psql -U postgres -d "$PATRONI_DB" -c "SELECT 1;" >/dev/null 2>&1; then
+                    log "SUCCESS" "New leader is ready for queries"
+                    return 0
+                fi
+                sleep 1
+                ((attempts++))
+            done
+            
+            log "WARN" "New leader elected but not yet ready for queries"
             return 0
         fi
         
-        echo "   ⚡ Election in progress... (${wait_time}s elapsed)"
+        # Show progress less frequently to reduce noise
+        if [ $((wait_time % 6)) -eq 0 ]; then
+            log "INFO" "Election in progress... (${wait_time}s)"
+        fi
+        
         sleep $check_interval
         wait_time=$((wait_time + check_interval))
     done
     
-    echo "⚠️  Leader election taking longer than expected (${max_wait}s)"
+    log "WARN" "Leader election taking longer than expected (${max_wait}s)"
+    
+    # Try to find any working coordinator as fallback
+    local fallback_leader=$(detect_current_leader)
+    if [ -n "$fallback_leader" ]; then
+        log "INFO" "Using fallback leader: ${fallback_leader}"
+        return 0
+    fi
+    
     return 1
 }
 
@@ -266,14 +323,14 @@ get_patroni_primary_worker() {
 show_standard_topology() {
     print_section "STANDARD CITUS TOPOLOGY"
     
-    echo -e "${BOLD}📊 COORDINATOR:${NC}"
+    echo -e "${BOLD}COORDINATOR:${NC}"
     if container_healthy "$STANDARD_COORDINATOR"; then
-        echo -e "${GREEN}   ✅ $STANDARD_COORDINATOR (ACTIVE)${NC}"
+    echo -e "${GREEN}   $STANDARD_COORDINATOR (ACTIVE)${NC}"
     else
-        echo -e "${RED}   ❌ $STANDARD_COORDINATOR (DOWN)${NC}"
+    echo -e "${RED}   $STANDARD_COORDINATOR (DOWN)${NC}"
     fi
     
-    echo -e "${BOLD}🔄 WORKERS:${NC}"
+    echo -e "${BOLD}WORKERS:${NC}"
     if container_healthy "$STANDARD_COORDINATOR"; then
         docker exec "$STANDARD_COORDINATOR" psql -U postgres -d "$STANDARD_DB" -c "
         SELECT 
@@ -284,30 +341,30 @@ show_standard_topology() {
         WHERE noderole = 'primary'
         ORDER BY nodename;" 2>/dev/null || echo "   ⚠️  Unable to query worker status"
     else
-        echo -e "${RED}   ❌ Cannot query workers - coordinator down${NC}"
+    echo -e "${RED}   Cannot query workers - coordinator down${NC}"
     fi
 }
 
 show_patroni_topology() {
     print_section "PATRONI CITUS TOPOLOGY"
     
-    echo -e "${BOLD}📊 COORDINATORS:${NC}"
+    echo -e "${BOLD}COORDINATORS:${NC}"
     local leader
     leader=$(get_patroni_leader)
     
     for coord in "$PATRONI_COORDINATOR1" "$PATRONI_COORDINATOR2" "$PATRONI_COORDINATOR3"; do
         if container_healthy "$coord"; then
             if [[ "$coord" == "$leader" ]]; then
-                echo -e "${GREEN}   ✅ $coord (LEADER)${NC}"
+                echo -e "${GREEN}   $coord (LEADER)${NC}"
             else
-                echo -e "${YELLOW}   🟡 $coord (REPLICA)${NC}"
+                echo -e "${YELLOW}   $coord (REPLICA)${NC}"
             fi
         else
-            echo -e "${RED}   ❌ $coord (DOWN)${NC}"
+            echo -e "${RED}   $coord (DOWN)${NC}"
         fi
     done
     
-    echo -e "${BOLD}🔄 WORKER GROUPS:${NC}"
+    echo -e "${BOLD}WORKER GROUPS:${NC}"
     
     # Worker Group 1
     echo -e "${CYAN}   Group 1:${NC}"
@@ -317,12 +374,12 @@ show_patroni_topology() {
     for worker in "$PATRONI_WORKER1_PRIMARY" "$PATRONI_WORKER1_STANDBY"; do
         if container_healthy "$worker"; then
             if [[ "$worker" == "$w1_primary" ]]; then
-                echo -e "${GREEN}     ✅ $worker (PRIMARY)${NC}"
+                echo -e "${GREEN}     $worker (PRIMARY)${NC}"
             else
-                echo -e "${YELLOW}     🟡 $worker (STANDBY)${NC}"
+                echo -e "${YELLOW}     $worker (STANDBY)${NC}"
             fi
         else
-            echo -e "${RED}     ❌ $worker (DOWN)${NC}"
+            echo -e "${RED}     $worker (DOWN)${NC}"
         fi
     done
     
@@ -334,18 +391,18 @@ show_patroni_topology() {
     for worker in "$PATRONI_WORKER2_PRIMARY" "$PATRONI_WORKER2_STANDBY"; do
         if container_healthy "$worker"; then
             if [[ "$worker" == "$w2_primary" ]]; then
-                echo -e "${GREEN}     ✅ $worker (PRIMARY)${NC}"
+                echo -e "${GREEN}     $worker (PRIMARY)${NC}"
             else
-                echo -e "${YELLOW}     🟡 $worker (STANDBY)${NC}"
+                echo -e "${YELLOW}     $worker (STANDBY)${NC}"
             fi
         else
-            echo -e "${RED}     ❌ $worker (DOWN)${NC}"
+            echo -e "${RED}     $worker (DOWN)${NC}"
         fi
     done
     
     # Show registered workers in Citus
     if [[ -n "$leader" ]]; then
-        echo -e "${BOLD}🗂️  REGISTERED WORKERS:${NC}"
+        echo -e "${BOLD}REGISTERED WORKERS:${NC}"
         docker exec "$leader" psql -U postgres -d "$PATRONI_DB" -c "
         SELECT 
             nodename as worker,
@@ -367,7 +424,7 @@ test_query() {
     local database="$3"
     local description="$4"
     
-    echo -e "${YELLOW}🔍 Testing: ${description}${NC}"
+    echo -e "${YELLOW}Testing: ${description}${NC}"
     
     local start_time
     start_time=$(date +%s.%N)
@@ -383,14 +440,14 @@ test_query() {
         end_time=$(date +%s.%N)
         local duration
         duration=$(echo "$end_time - $start_time" | bc 2>/dev/null | cut -c1-5 || echo "N/A")
-        log "SUCCESS" "Query completed successfully (${duration}s)"
+    log "SUCCESS" "Query completed successfully (${duration}s)"
         return 0
     else
         local end_time
         end_time=$(date +%s.%N)  
         local duration
         duration=$(echo "$end_time - $start_time" | bc 2>/dev/null | cut -c1-5 || echo "N/A")
-        log "ERROR" "Query failed after ${duration}s"
+    log "ERROR" "Query failed after ${duration}s"
         return 1
     fi
 }
@@ -412,12 +469,12 @@ simulate_coordinator_failure() {
         fi
     fi
     
-    log "WARN" "🔥 Pausing current leader: $coordinator"
+    log "WARN" "Pausing current leader: $coordinator"
     docker pause "$coordinator" 2>/dev/null || true
     
     if [[ "$env" == "patroni" ]]; then
-        echo "⚡ Patroni should elect new leader automatically..."
-        echo "   This may take 5-15 seconds for leader election..."
+    echo "Patroni should elect new leader automatically..."
+    echo "   This may take 5-15 seconds for leader election..."
         
         # Wait for new leader to be elected
         local attempts=0
@@ -428,47 +485,47 @@ simulate_coordinator_failure() {
             sleep 2
             new_leader=$(get_patroni_leader)
             if [[ -n "$new_leader" && "$new_leader" != "$coordinator" ]]; then
-                log "SUCCESS" "✅ New leader elected: $new_leader"
+                log "SUCCESS" "New leader elected: $new_leader"
                 break
             fi
             attempts=$((attempts + 1))
-            echo "   ⏳ Waiting for leader election... (${attempts}/${max_attempts})"
+            echo "   Waiting for leader election... (${attempts}/${max_attempts})"
         done
         
         if [[ $attempts -eq $max_attempts ]]; then
-            log "WARN" "⚠️  Leader election taking longer than expected"
+            log "WARN" "Leader election taking longer than expected"
             echo "   This is normal during coordinator failover"
         fi
         
         # Test queries after failover
-        echo "🔍 Testing queries after automatic failover..."
+    echo "Testing queries after automatic failover..."
         test_queries_during_failure "$env" "coordinator"
     else
         sleep "$FAILOVER_WAIT"
-        log "ERROR" "💥 Coordinator $coordinator is DOWN - No automatic recovery!"
+    log "ERROR" "Coordinator $coordinator is DOWN - No automatic recovery!"
     fi
 }
 
 simulate_worker_failure() {
     local worker="$1"
     
-    log "WARN" "🔥 SIMULATING WORKER FAILURE: $worker"  
+    log "WARN" "SIMULATING WORKER FAILURE: $worker"  
     docker pause "$worker" 2>/dev/null || true
     sleep "$FAILOVER_WAIT"
-    log "ERROR" "💥 Worker $worker is DOWN"
+    log "ERROR" "Worker $worker is DOWN"
 }
 
 recover_container() {
     local container="$1"
     
-    log "INFO" "🔧 RECOVERING: $container"
+    log "INFO" "RECOVERING: $container"
     docker unpause "$container" 2>/dev/null || true
     sleep "$RECOVERY_WAIT"
     
     if container_healthy "$container"; then
-        log "SUCCESS" "✅ Container $container recovered successfully"
+    log "SUCCESS" "Container $container recovered successfully"
     else
-        log "WARN" "⚠️  Container $container started but may need more time"
+    log "WARN" "Container $container started but may need more time"
     fi
 }
 
@@ -495,8 +552,7 @@ run_ha_demonstration() {
 
 demonstrate_standard_limitations() {
     print_header "STANDARD CITUS - HA LIMITATIONS DEMO"
-    
-    echo -e "${YELLOW}🎯 OBJECTIVE: Show limitations of basic Citus setup${NC}"
+    echo -e "${YELLOW}OBJECTIVE: Show limitations of basic Citus setup${NC}"
     echo -e "${YELLOW}   This will demonstrate why HA solutions like Patroni are needed${NC}"
     echo
     
@@ -516,64 +572,87 @@ demonstrate_standard_limitations() {
     simulate_coordinator_failure "standard" "$STANDARD_COORDINATOR"
     show_standard_topology
     test_query "standard" "$STANDARD_COORDINATOR" "$STANDARD_DB" "Query during coordinator failure"
-    
     echo -e "${CYAN}Press Enter to recover coordinator...${NC}"
     read -r
     
     print_section "COORDINATOR RECOVERY"
     recover_container "$STANDARD_COORDINATOR"
-    
-    # Wait for coordinator to be ready
-    log "INFO" "⏳ Waiting for coordinator to be ready..."
+    log "INFO" "Waiting for coordinator to be ready..."
     local attempts=0
     while ! container_healthy "$STANDARD_COORDINATOR" && [[ $attempts -lt 30 ]]; do
         sleep 2
         ((attempts++))
     done
-    
     show_standard_topology
     test_query "standard" "$STANDARD_COORDINATOR" "$STANDARD_DB" "Query after coordinator recovery"
-    
     print_section "WORKER FAILURE TEST"
     echo -e "${CYAN}Press Enter to test worker failure...${NC}"
     read -r
-    
     simulate_worker_failure "$STANDARD_WORKER1"
     show_standard_topology
     test_query "standard" "$STANDARD_COORDINATOR" "$STANDARD_DB" "Query with worker1 down"
-    
     print_section "WORKER RECOVERY"
     echo -e "${CYAN}Press Enter to recover worker...${NC}"
     read -r
-    
     recover_container "$STANDARD_WORKER1"
     show_standard_topology
     test_query "standard" "$STANDARD_COORDINATOR" "$STANDARD_DB" "Query after worker recovery"
-    
     print_section "STANDARD CITUS - LIMITATIONS SUMMARY"
-    echo -e "${RED}� CRITICAL LIMITATIONS IDENTIFIED:${NC}"
+    echo -e "${RED}CRITICAL LIMITATIONS IDENTIFIED:${NC}"
     echo
-    echo -e "   ${RED}❌ SINGLE POINT OF FAILURE${NC}"
-    echo -e "      • Coordinator failure = Complete cluster down"
-    echo -e "      • No automatic failover mechanism"
+    echo -e "   ${RED}SINGLE POINT OF FAILURE${NC}"
+    echo -e "      - Coordinator failure = Complete cluster down"
+    echo -e "      - No automatic failover mechanism"
     echo
-    echo -e "   ${RED}❌ DATA LOSS RISK${NC}"
-    echo -e "      • No replication for coordinator"
-    echo -e "      • Worker failures lose shard data"
+    echo -e "   ${RED}DATA LOSS RISK${NC}"
+    echo -e "      - No replication for coordinator"
+    echo -e "      - Worker failures lose shard data"
     echo
-    echo -e "   ${RED}❌ MANUAL RECOVERY REQUIRED${NC}"
-    echo -e "      • DBA intervention needed for all failures"
-    echo -e "      • Long recovery times (minutes to hours)"
+    echo -e "   ${RED}MANUAL RECOVERY REQUIRED${NC}"
+    echo -e "      - DBA intervention needed for all failures"
+    echo -e "      - Long recovery times (minutes to hours)"
     echo
-    echo -e "   ${RED}❌ NOT PRODUCTION READY${NC}"
-    echo -e "      • No 24/7 availability guarantees"
-    echo -e "      • Unsuitable for mission-critical applications"
+    echo -e "   ${RED}NOT PRODUCTION READY${NC}"
+    echo -e "      - No 24/7 availability guarantees"
+    echo -e "      - Unsuitable for mission-critical applications"
+    echo
+    echo -e "${CYAN}SOLUTION: Use Patroni + Citus for production workloads${NC}"
+    echo -e "${CYAN}   - Automatic failover in seconds${NC}"
+    echo -e "${CYAN}   - Zero data loss with replication${NC}"
+    echo -e "${CYAN}   - Self-healing cluster architecture${NC}"
+}
+
+check_patroni_cluster_health() {
+    log "INFO" "Checking Patroni cluster health..."
     
-    echo
-    echo -e "${CYAN}💡 SOLUTION: Use Patroni + Citus for production workloads${NC}"
-    echo -e "${CYAN}   • Automatic failover in seconds${NC}"
-    echo -e "${CYAN}   • Zero data loss with replication${NC}"
-    echo -e "${CYAN}   • Self-healing cluster architecture${NC}"
+    local healthy_coordinators=0
+    local total_coordinators=0
+    
+    for coord in "$PATRONI_COORDINATOR1" "$PATRONI_COORDINATOR2" "$PATRONI_COORDINATOR3"; do
+        ((total_coordinators++))
+        if container_healthy "$coord"; then
+            ((healthy_coordinators++))
+            log "SUCCESS" "Coordinator $coord is healthy"
+        else
+            log "WARN" "Coordinator $coord is not healthy"
+        fi
+    done
+    
+    log "INFO" "Healthy coordinators: $healthy_coordinators/$total_coordinators"
+    
+    if [ $healthy_coordinators -lt 2 ]; then
+        log "ERROR" "Need at least 2 healthy coordinators for HA demonstration"
+        return 1
+    fi
+    
+    local leader=$(get_patroni_leader)
+    if [ -n "$leader" ]; then
+        log "SUCCESS" "Cluster has active leader: $leader"
+        return 0
+    else
+        log "ERROR" "No active leader found"
+        return 1
+    fi
 }
 
 demonstrate_patroni_capabilities() {
@@ -583,13 +662,14 @@ demonstrate_patroni_capabilities() {
     echo -e "${GREEN}   This demonstrates production-ready high availability${NC}"
     echo
     
-    local leader
-    leader=$(get_patroni_leader)
-    
-    if [[ -z "$leader" ]]; then
-        log "ERROR" "No Patroni leader found. Please start the Patroni cluster first."
+    # Check cluster health before starting
+    if ! check_patroni_cluster_health; then
+        log "ERROR" "Patroni cluster is not healthy enough for HA demonstration"
         return 1
     fi
+    
+    local leader
+    leader=$(get_patroni_leader)
     
     print_section "BASELINE TEST"
     show_patroni_topology
@@ -992,17 +1072,17 @@ simulate_coordinator_failure() {
         "patroni")
             local current_leader
             current_leader=$(get_patroni_leader)
-            echo -e "${YELLOW}🔄 Pausing current leader: $current_leader${NC}"
+            log "WARN" "Pausing current leader: $current_leader"
             docker pause "$current_leader" 2>/dev/null || true
             
-            echo -e "${GREEN}⚡ Patroni should elect new leader automatically...${NC}"
+            log "INFO" "Patroni should elect new leader automatically..."
             
-            # Wait for new leader election
-            if wait_for_leader_election; then
-                echo -e "${CYAN}🔍 Testing queries with new coordinator setup...${NC}"
+            # Wait for new leader election, passing the failed leader
+            if wait_for_leader_election "$current_leader"; then
+                log "INFO" "Testing queries with new coordinator setup..."
                 test_queries_during_failure "$arch" "coordinator"
             else
-                echo -e "${YELLOW}⚠️  Leader election incomplete - testing anyway...${NC}"
+                log "WARN" "Leader election incomplete - testing anyway..."
                 test_queries_during_failure "$arch" "coordinator"
             fi
             ;;
@@ -1016,26 +1096,39 @@ test_queries_during_failure() {
     
     # For coordinator failures in Patroni, we need to detect the new leader
     if [[ "$failure_type" == "coordinator" && "$arch" == "patroni" ]]; then
-        coordinator=$(get_patroni_leader)
-        if [[ -z "$coordinator" ]]; then
-            echo -e "${YELLOW}🔍 Testing queries during leader transition...${NC}"
-            echo -e "${YELLOW}   ⚠️  No leader currently available - election may still be in progress${NC}"
+        log "INFO" "Testing queries during leader transition..."
+        
+        # Try to get the current leader with retries
+        local retries=5
+        local retry_delay=3
+        
+        for i in $(seq 1 $retries); do
+            coordinator=$(get_patroni_leader)
+            if [[ -n "$coordinator" ]]; then
+                log "SUCCESS" "Active leader found: $coordinator"
+                break
+            fi
             
-            # Try a few more times with short waits
-            local retries=3
-            for i in $(seq 1 $retries); do
-                echo -e "${YELLOW}   ⏳ Retry $i/$retries - checking for new leader...${NC}"
-                sleep 2
-                coordinator=$(get_patroni_leader)
-                if [[ -n "$coordinator" ]]; then
-                    echo -e "${GREEN}   🎯 New leader found: $coordinator${NC}"
+            if [[ $i -lt $retries ]]; then
+                log "INFO" "Retry $i/$retries - waiting for new leader..."
+                sleep $retry_delay
+            fi
+        done
+        
+        if [[ -z "$coordinator" ]]; then
+            log "WARN" "No leader available - will test connection failures"
+            # Try each coordinator to see if any is responding
+            local backup_coordinators=("citus_coordinator1" "citus_coordinator2" "citus_coordinator3")
+            for backup in "${backup_coordinators[@]}"; do
+                if container_running "$backup" && timeout 3 docker exec "$backup" pg_isready -U postgres >/dev/null 2>&1; then
+                    coordinator="$backup"
+                    log "INFO" "Using backup coordinator: $backup"
                     break
                 fi
             done
             
             if [[ -z "$coordinator" ]]; then
-                echo -e "${ORANGE}   ⚠️  Still no leader - testing will show connection failures${NC}"
-                coordinator="citus_coordinator1"  # Use fallback for testing
+                coordinator="citus_coordinator1"  # Ultimate fallback for testing
             fi
         fi
     else
@@ -1110,15 +1203,17 @@ test_queries_during_failure() {
 recover_all_services() {
     local arch="$1"
     
-    echo -e "${CYAN}🔧 Recovering all services...${NC}"
+    log "INFO" "Recovering all services..."
     
     case "$arch" in
         "standard")
             docker unpause "$STANDARD_COORDINATOR" 2>/dev/null || true
             docker unpause "$STANDARD_WORKER1" 2>/dev/null || true
             docker unpause "$STANDARD_WORKER2" 2>/dev/null || true
+            sleep 5
             ;;
         "patroni")
+            # Unpause all containers
             docker unpause "$PATRONI_COORDINATOR1" 2>/dev/null || true
             docker unpause "$PATRONI_COORDINATOR2" 2>/dev/null || true
             docker unpause "$PATRONI_COORDINATOR3" 2>/dev/null || true
@@ -1126,11 +1221,22 @@ recover_all_services() {
             docker unpause "$PATRONI_WORKER1_STANDBY" 2>/dev/null || true
             docker unpause "$PATRONI_WORKER2_PRIMARY" 2>/dev/null || true
             docker unpause "$PATRONI_WORKER2_STANDBY" 2>/dev/null || true
+            
+            # Wait for Patroni to stabilize the cluster
+            log "INFO" "Waiting for Patroni cluster to stabilize..."
+            sleep 10
+            
+            # Verify we have a leader
+            local leader=$(get_patroni_leader)
+            if [ -n "$leader" ]; then
+                log "SUCCESS" "Cluster stabilized with leader: $leader"
+            else
+                log "WARN" "Cluster recovery may need more time"
+            fi
             ;;
     esac
     
-    sleep 5
-    echo -e "${GREEN}✅ Recovery complete${NC}"
+    log "SUCCESS" "Recovery procedure complete"
 }
 
 show_standard_limitations_summary() {
@@ -1214,7 +1320,7 @@ show_menu() {
             echo
             echo -e "${YELLOW}Please start a Citus cluster first:${NC}"
             echo -e "${YELLOW}   Standard: docker-compose up -d${NC}"
-            echo -e "${YELLOW}   Patroni:   ./02_simple_setup.sh${NC}"
+            echo -e "${YELLOW}   Patroni:   ./simple_setup.sh${NC}"
             echo
             echo -e "${RED}1)${NC} Exit"
             ;;
@@ -1276,13 +1382,24 @@ main() {
         log "WARN" "bc not found - timing measurements will be limited"
     fi
     
-    # Main loop
-    while true; do
-        show_menu
-        echo
-        echo -e "${CYAN}Press Enter to return to menu...${NC}"
-        read -r
-    done
+    # Detect current architecture and run HA Capabilities Demo directly
+    local arch
+    arch=$(detect_current_architecture)
+    
+    case "$arch" in
+        "patroni")
+            log "INFO" "Detected Patroni Citus - Running HA Capabilities Demo"
+            demonstrate_patroni_capabilities
+            ;;
+        *)
+            log "ERROR" "No Patroni cluster detected. This demo requires Patroni Citus."
+            echo -e "${YELLOW}Please start Patroni Citus cluster first: ./simple_setup.sh${NC}"
+            exit 1
+            ;;
+    esac
+    
+    echo
+    echo -e "${CYAN}HA Capabilities demonstration completed.${NC}"
 }
 
 # Handle script interruption gracefully  
