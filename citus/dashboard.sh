@@ -628,7 +628,7 @@ main() {
                     read -r
                     return
                 fi
-                ./02_simple_setup.sh
+                ./simple_setup.sh
                 ;;
             3)
                 echo -e "${CYAN}Running HA & Failover...${NC}"
