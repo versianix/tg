@@ -18,7 +18,7 @@ from datetime import datetime
 
 # Configure professional chart styling
 plt.style.use('seaborn-v0_8-whitegrid')
-colors_palette = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D']
+colors_palette = ['#2E86AB', '#F18F01', '#A23B72', '#C73E1D']
 sns.set_palette(colors_palette)
 plt.rcParams['figure.figsize'] = (14, 8)
 plt.rcParams['font.size'] = 12
@@ -37,8 +37,9 @@ class BenchmarkAnalyzer:
             base_dir = Path(base_dir)
             
         self.base_dir = base_dir
-        self.postgresql_csv = base_dir / "postgre" / "benchmark_universal" / "latest_reports" / "benchmark_results.csv"
-        self.citus_csv = base_dir / "citus" / "benchmark_universal" / "latest_reports" / "benchmark_results.csv"
+        self.postgresql_csv = base_dir / "postgre" / "benchmark_universal" / "latest_reports_postgresql" / "benchmark_results.csv"
+        self.citus_csv = base_dir / "citus" / "benchmark_universal" / "latest_reports_citus" / "benchmark_results.csv"
+        self.citus_patroni_csv = base_dir / "citus" / "benchmark_universal" / "latest_reports_citus_patroni" / "benchmark_results.csv"
         self.output_dir = base_dir / "comparison_charts"
         
         # Create output directory
@@ -52,22 +53,37 @@ class BenchmarkAnalyzer:
         """Load data from CSV files"""
         print("\n📂 Loading data...")
         
-        # Check if files exist
-        if not self.postgresql_csv.exists():
-            raise FileNotFoundError(f"PostgreSQL CSV not found: {self.postgresql_csv}")
-        if not self.citus_csv.exists():
-            raise FileNotFoundError(f"Citus CSV not found: {self.citus_csv}")
+        # Check which files exist
+        datasets = []
+        
+        if self.postgresql_csv.exists():
+            pg_data = pd.read_csv(self.postgresql_csv)
+            datasets.append(pg_data)
+            print(f"   ✅ PostgreSQL: {len(pg_data)} records")
+        else:
+            print(f"   ⚠️  PostgreSQL CSV not found: {self.postgresql_csv}")
+            
+        if self.citus_csv.exists():
+            citus_data = pd.read_csv(self.citus_csv)
+            datasets.append(citus_data)
+            print(f"   ✅ Citus: {len(citus_data)} records")
+        else:
+            print(f"   ⚠️  Citus CSV not found: {self.citus_csv}")
+            
+        if self.citus_patroni_csv.exists():
+            citus_patroni_data = pd.read_csv(self.citus_patroni_csv)
+            datasets.append(citus_patroni_data)
+            print(f"   ✅ Citus + Patroni: {len(citus_patroni_data)} records")
+        else:
+            print(f"   ⚠️  Citus + Patroni CSV not found: {self.citus_patroni_csv}")
+        
+        if not datasets:
+            raise FileNotFoundError("No benchmark CSV files found!")
             
         # Load data
         try:
-            pg_data = pd.read_csv(self.postgresql_csv)
-            citus_data = pd.read_csv(self.citus_csv)
-            
-            print(f"   ✅ PostgreSQL: {len(pg_data)} records")
-            print(f"   ✅ Citus: {len(citus_data)} records")
-            
             # Combine data
-            combined_data = pd.concat([pg_data, citus_data], ignore_index=True)
+            combined_data = pd.concat(datasets, ignore_index=True)
             
             # Convert data types
             combined_data['TPS'] = pd.to_numeric(combined_data['TPS'], errors='coerce')
@@ -129,52 +145,56 @@ class BenchmarkAnalyzer:
         else:
             fig, axes = plt.subplots(1, n_suites, figsize=(7*n_suites, 7))
             
-        fig.suptitle('Performance Comparison: Transactions Per Second (TPS)\nPostgreSQL vs Citus', 
+        fig.suptitle('Performance Comparison: Transactions Per Second (TPS)\nPostgreSQL vs Citus vs Citus + Patroni', 
                      fontsize=18, fontweight='bold', y=0.95)
         
-        colors = ['#2E86AB', '#F18F01']  # Professional blue for PostgreSQL, Orange for Citus
+        # Colors for three architectures
+        colors = {'postgresql': '#2E86AB', 'citus': '#F18F01', 'citus_patroni': '#A23B72'}
         
         for idx, suite in enumerate(suites):
             ax = axes[idx]
             suite_data = stats[stats['Suite'] == suite]
             
-            # Data by database type
-            pg_data = suite_data[suite_data['Database_Type'] == 'postgresql']
-            citus_data = suite_data[suite_data['Database_Type'] == 'citus']
+            # Get unique database types in the data
+            db_types = sorted(suite_data['Database_Type'].unique())
+            n_types = len(db_types)
             
-            x = np.arange(len(pg_data))
-            width = 0.35
+            # Get the client configurations (assuming same for all db types)
+            clients_configs = sorted(suite_data['Clients'].unique())
+            x = np.arange(len(clients_configs))
+            width = 0.25  # Adjusted for 3 bars
             
-            # Create bars with professional styling
-            bars1 = ax.bar(x - width/2, pg_data['TPS_mean'], width, 
-                          yerr=pg_data['TPS_std'], label='PostgreSQL', 
-                          color=colors[0], alpha=0.85, capsize=5, 
-                          edgecolor='white', linewidth=1.5)
-            bars2 = ax.bar(x + width/2, citus_data['TPS_mean'], width,
-                          yerr=citus_data['TPS_std'], label='Citus',
-                          color=colors[1], alpha=0.85, capsize=5,
-                          edgecolor='white', linewidth=1.5)
+            bars_list = []
+            for i, db_type in enumerate(db_types):
+                db_data = suite_data[suite_data['Database_Type'] == db_type]
+                # Ensure data is sorted by clients
+                db_data = db_data.sort_values('Clients')
+                
+                label = db_type.replace('_', ' + ').title() if db_type == 'citus_patroni' else db_type.title()
+                
+                bars = ax.bar(x + (i - n_types//2) * width, db_data['TPS_mean'], width,
+                             yerr=db_data['TPS_std'], label=label,
+                             color=colors.get(db_type, '#666666'), alpha=0.85, capsize=5,
+                             edgecolor='white', linewidth=1.5)
+                bars_list.append(bars)
             
             # Customize axes with professional styling
             ax.set_title(f'{suite.replace("_", " ").title()}', fontweight='bold', fontsize=14, pad=20)
             ax.set_xlabel('Number of Clients', fontweight='semibold')
             ax.set_ylabel('TPS (Transactions/sec)', fontweight='semibold')
             ax.set_xticks(x)
-            ax.set_xticklabels(pg_data['Clients'].astype(int))
+            ax.set_xticklabels([int(c) for c in clients_configs])
             ax.legend(frameon=True, fancybox=True, shadow=True)
             ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
             ax.set_axisbelow(True)
             
             # Add value labels on bars
-            for bar in bars1:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + height*0.05,
-                       f'{height:.0f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
-            
-            for bar in bars2:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + height*0.05,
-                       f'{height:.0f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+            for bars in bars_list:
+                for bar in bars:
+                    height = bar.get_height()
+                    if not np.isnan(height):
+                        ax.text(bar.get_x() + bar.get_width()/2., height + height*0.05,
+                               f'{height:.0f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
         
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         
@@ -201,52 +221,56 @@ class BenchmarkAnalyzer:
         else:
             fig, axes = plt.subplots(1, n_suites, figsize=(7*n_suites, 7))
             
-        fig.suptitle('Latency Comparison: Average Response Time\nPostgreSQL vs Citus', 
+        fig.suptitle('Latency Comparison: Average Response Time\nPostgreSQL vs Citus vs Citus + Patroni', 
                      fontsize=18, fontweight='bold', y=0.95)
         
-        colors = ['#2E86AB', '#F18F01']
+        # Colors for three architectures
+        colors = {'postgresql': '#2E86AB', 'citus': '#F18F01', 'citus_patroni': '#A23B72'}
         
         for idx, suite in enumerate(suites):
             ax = axes[idx]
             suite_data = stats[stats['Suite'] == suite]
             
-            # Data by database type
-            pg_data = suite_data[suite_data['Database_Type'] == 'postgresql']
-            citus_data = suite_data[suite_data['Database_Type'] == 'citus']
+            # Get unique database types in the data
+            db_types = sorted(suite_data['Database_Type'].unique())
+            n_types = len(db_types)
             
-            x = np.arange(len(pg_data))
-            width = 0.35
+            # Get the client configurations (assuming same for all db types)
+            clients_configs = sorted(suite_data['Clients'].unique())
+            x = np.arange(len(clients_configs))
+            width = 0.25  # Adjusted for 3 bars
             
-            # Create bars with professional styling
-            bars1 = ax.bar(x - width/2, pg_data['Latency_mean'], width,
-                          yerr=pg_data['Latency_std'], label='PostgreSQL',
-                          color=colors[0], alpha=0.85, capsize=5,
-                          edgecolor='white', linewidth=1.5)
-            bars2 = ax.bar(x + width/2, citus_data['Latency_mean'], width,
-                          yerr=citus_data['Latency_std'], label='Citus',
-                          color=colors[1], alpha=0.85, capsize=5,
-                          edgecolor='white', linewidth=1.5)
+            bars_list = []
+            for i, db_type in enumerate(db_types):
+                db_data = suite_data[suite_data['Database_Type'] == db_type]
+                # Ensure data is sorted by clients
+                db_data = db_data.sort_values('Clients')
+                
+                label = db_type.replace('_', ' + ').title() if db_type == 'citus_patroni' else db_type.title()
+                
+                bars = ax.bar(x + (i - n_types//2) * width, db_data['Latency_mean'], width,
+                             yerr=db_data['Latency_std'], label=label,
+                             color=colors.get(db_type, '#666666'), alpha=0.85, capsize=5,
+                             edgecolor='white', linewidth=1.5)
+                bars_list.append(bars)
             
             # Customize axes with professional styling
             ax.set_title(f'{suite.replace("_", " ").title()}', fontweight='bold', fontsize=14, pad=20)
             ax.set_xlabel('Number of Clients', fontweight='semibold')
             ax.set_ylabel('Average Latency (ms)', fontweight='semibold')
             ax.set_xticks(x)
-            ax.set_xticklabels(pg_data['Clients'].astype(int))
+            ax.set_xticklabels([int(c) for c in clients_configs])
             ax.legend(frameon=True, fancybox=True, shadow=True)
             ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
             ax.set_axisbelow(True)
             
             # Add value labels on bars
-            for bar in bars1:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + height*0.05,
-                       f'{height:.1f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
-            
-            for bar in bars2:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + height*0.05,
-                       f'{height:.1f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+            for bars in bars_list:
+                for bar in bars:
+                    height = bar.get_height()
+                    if not np.isnan(height):
+                        ax.text(bar.get_x() + bar.get_width()/2., height + height*0.05,
+                               f'{height:.1f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
         
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         
@@ -273,36 +297,48 @@ class BenchmarkAnalyzer:
         else:
             fig, axes = plt.subplots(1, n_suites, figsize=(7*n_suites, 7))
             
-        fig.suptitle('Performance Trade-off: TPS vs Latency\nPostgreSQL vs Citus', 
+        fig.suptitle('Performance Trade-off: TPS vs Latency\nPostgreSQL vs Citus vs Citus + Patroni', 
                      fontsize=18, fontweight='bold', y=0.95)
         
-        colors = {'postgresql': '#2E86AB', 'citus': '#F18F01'}
-        markers = {'postgresql': 'o', 'citus': 's'}
+        colors = {'postgresql': '#2E86AB', 'citus': '#F18F01', 'citus_patroni': '#A23B72'}
+        markers = {'postgresql': 'o', 'citus': 's', 'citus_patroni': '^'}
         
         for idx, suite in enumerate(suites):
             ax = axes[idx]
             suite_data = stats[stats['Suite'] == suite]
             
-            for db_type in ['postgresql', 'citus']:
+            # Get unique database types in the data
+            db_types = sorted(suite_data['Database_Type'].unique())
+            
+            for db_type in db_types:
                 db_data = suite_data[suite_data['Database_Type'] == db_type]
                 
-                ax.scatter(db_data['Latency_mean'], db_data['TPS_mean'],
-                          c=colors[db_type], marker=markers[db_type],
-                          s=120, alpha=0.85, label=db_type.title(),
-                          edgecolors='white', linewidth=2)
+                if len(db_data) == 0:
+                    continue
                 
-                # Add client labels
+                label = db_type.replace('_', ' + ').title() if db_type == 'citus_patroni' else db_type.title()
+                
+                ax.scatter(db_data['Latency_mean'], db_data['TPS_mean'],
+                          c=colors.get(db_type, '#666666'), marker=markers.get(db_type, 'o'),
+                          s=150, alpha=0.9, label=label,
+                          edgecolors='white', linewidth=2.5)
+                
+                # Add client labels with better positioning
                 for _, row in db_data.iterrows():
-                    ax.annotate(f"{int(row['Clients'])}c", 
+                    ax.annotate(f"{int(row['Clients'])} clients", 
                                (row['Latency_mean'], row['TPS_mean']),
-                               xytext=(8, 8), textcoords='offset points',
-                               fontsize=9, fontweight='semibold', alpha=0.8,
-                               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+                               xytext=(10, 10), textcoords='offset points',
+                               fontsize=8, fontweight='bold', alpha=0.9,
+                               bbox=dict(boxstyle='round,pad=0.4', 
+                                       facecolor=colors.get(db_type, '#666666'), 
+                                       alpha=0.8, edgecolor='white'),
+                               color='white')
             
-            ax.set_title(f'{suite.replace("_", " ").title()}', fontweight='bold', fontsize=14, pad=20)
+            ax.set_title(f'{suite.replace("_", " ").title()}\n(Each point = different client count)', 
+                        fontweight='bold', fontsize=14, pad=20)
             ax.set_xlabel('Average Latency (ms)', fontweight='semibold')
             ax.set_ylabel('TPS (Transactions/sec)', fontweight='semibold')
-            ax.legend(frameon=True, fancybox=True, shadow=True)
+            ax.legend(frameon=True, fancybox=True, shadow=True, loc='best')
             ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
             ax.set_axisbelow(True)
         
@@ -335,16 +371,24 @@ class BenchmarkAnalyzer:
         ).round(2)
         
         # Calculate improvements/degradations
-        if 'postgresql' in pivot_tps.columns and 'citus' in pivot_tps.columns:
-            pivot_tps['Citus_vs_PG_%'] = ((pivot_tps['citus'] - pivot_tps['postgresql']) / pivot_tps['postgresql'] * 100).round(1)
-            pivot_latency['Citus_vs_PG_%'] = ((pivot_latency['citus'] - pivot_latency['postgresql']) / pivot_latency['postgresql'] * 100).round(1)
+        if 'postgresql' in pivot_tps.columns:
+            if 'citus' in pivot_tps.columns:
+                pivot_tps['Citus_vs_PG_%'] = ((pivot_tps['citus'] - pivot_tps['postgresql']) / pivot_tps['postgresql'] * 100).round(1)
+                pivot_latency['Citus_vs_PG_%'] = ((pivot_latency['citus'] - pivot_latency['postgresql']) / pivot_latency['postgresql'] * 100).round(1)
+            if 'citus_patroni' in pivot_tps.columns:
+                pivot_tps['CitusPatroni_vs_PG_%'] = ((pivot_tps['citus_patroni'] - pivot_tps['postgresql']) / pivot_tps['postgresql'] * 100).round(1)
+                pivot_latency['CitusPatroni_vs_PG_%'] = ((pivot_latency['citus_patroni'] - pivot_latency['postgresql']) / pivot_latency['postgresql'] * 100).round(1)
+        
+        if 'citus' in pivot_tps.columns and 'citus_patroni' in pivot_tps.columns:
+            pivot_tps['CitusPatroni_vs_Citus_%'] = ((pivot_tps['citus_patroni'] - pivot_tps['citus']) / pivot_tps['citus'] * 100).round(1)
+            pivot_latency['CitusPatroni_vs_Citus_%'] = ((pivot_latency['citus_patroni'] - pivot_latency['citus']) / pivot_latency['citus'] * 100).round(1)
         
         # Save tables
         summary_file = self.output_dir / "performance_summary.txt"
         with open(summary_file, 'w', encoding='utf-8') as f:
             f.write("═══════════════════════════════════════════════════════════════\n")
             f.write("            PERFORMANCE COMPARISON SUMMARY\n")
-            f.write("                PostgreSQL vs Citus\n")
+            f.write("        PostgreSQL vs Citus vs Citus + Patroni\n")
             f.write("═══════════════════════════════════════════════════════════════\n\n")
             f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
@@ -362,29 +406,56 @@ class BenchmarkAnalyzer:
             f.write("📈 SUMMARY ANALYSIS\n")
             f.write("─" * 60 + "\n")
             
-            if 'postgresql' in pivot_tps.columns and 'citus' in pivot_tps.columns:
-                avg_tps_pg = pivot_tps['postgresql'].mean()
-                avg_tps_citus = pivot_tps['citus'].mean()
-                avg_lat_pg = pivot_latency['postgresql'].mean()
-                avg_lat_citus = pivot_latency['citus'].mean()
+            # Calculate averages for all available architectures
+            available_archs = [col for col in pivot_tps.columns if col in ['postgresql', 'citus', 'citus_patroni']]
+            
+            if available_archs:
+                # TPS Analysis
+                f.write("🚀 THROUGHPUT ANALYSIS:\n")
+                tps_averages = {}
+                for arch in available_archs:
+                    avg_tps = pivot_tps[arch].mean()
+                    tps_averages[arch] = avg_tps
+                    arch_name = arch.replace('_', ' + ').title() if arch == 'citus_patroni' else arch.title()
+                    f.write(f"  • {arch_name}: {avg_tps:.1f} TPS\n")
                 
-                f.write(f"Average PostgreSQL TPS: {avg_tps_pg:.1f}\n")
-                f.write(f"Average Citus TPS: {avg_tps_citus:.1f}\n")
-                f.write(f"TPS Difference: {((avg_tps_citus - avg_tps_pg) / avg_tps_pg * 100):.1f}%\n\n")
+                # Find best TPS
+                best_tps_arch = max(tps_averages, key=tps_averages.get)
+                best_arch_name = best_tps_arch.replace('_', ' + ').title() if best_tps_arch == 'citus_patroni' else best_tps_arch.title()
+                f.write(f"🏆 Highest Average TPS: {best_arch_name} ({tps_averages[best_tps_arch]:.1f})\n\n")
                 
-                f.write(f"Average PostgreSQL Latency: {avg_lat_pg:.2f} ms\n")
-                f.write(f"Average Citus Latency: {avg_lat_citus:.2f} ms\n")
-                f.write(f"Latency Difference: {((avg_lat_citus - avg_lat_pg) / avg_lat_pg * 100):.1f}%\n\n")
+                # Latency Analysis
+                f.write("⏱️  LATENCY ANALYSIS:\n")
+                latency_averages = {}
+                for arch in available_archs:
+                    avg_lat = pivot_latency[arch].mean()
+                    latency_averages[arch] = avg_lat
+                    arch_name = arch.replace('_', ' + ').title() if arch == 'citus_patroni' else arch.title()
+                    f.write(f"  • {arch_name}: {avg_lat:.2f} ms\n")
                 
-                if avg_tps_citus > avg_tps_pg:
-                    f.write("🏆 Citus shows higher average throughput\n")
-                else:
-                    f.write("🏆 PostgreSQL shows higher average throughput\n")
+                # Find best latency (lowest)
+                best_lat_arch = min(latency_averages, key=latency_averages.get)
+                best_lat_name = best_lat_arch.replace('_', ' + ').title() if best_lat_arch == 'citus_patroni' else best_lat_arch.title()
+                f.write(f"⚡ Lowest Average Latency: {best_lat_name} ({latency_averages[best_lat_arch]:.2f} ms)\n\n")
+                
+                # Comparative analysis
+                if 'postgresql' in available_archs:
+                    f.write("📊 COMPARATIVE PERFORMANCE:\n")
+                    pg_tps = tps_averages['postgresql']
+                    pg_lat = latency_averages['postgresql']
                     
-                if avg_lat_citus < avg_lat_pg:
-                    f.write("⚡ Citus shows lower average latency\n")
-                else:
-                    f.write("⚡ PostgreSQL shows lower average latency\n")
+                    for arch in available_archs:
+                        if arch != 'postgresql':
+                            arch_tps = tps_averages[arch]
+                            arch_lat = latency_averages[arch]
+                            arch_name = arch.replace('_', ' + ').title() if arch == 'citus_patroni' else arch.title()
+                            
+                            tps_diff = ((arch_tps - pg_tps) / pg_tps * 100)
+                            lat_diff = ((arch_lat - pg_lat) / pg_lat * 100)
+                            
+                            f.write(f"  • {arch_name} vs PostgreSQL:\n")
+                            f.write(f"    - TPS: {tps_diff:+.1f}%\n")
+                            f.write(f"    - Latency: {lat_diff:+.1f}%\n")
         
         print(f"   💾 Table saved: {summary_file}")
         
@@ -518,12 +589,12 @@ class BenchmarkAnalyzer:
 <body>
     <div class="container">
         <h1>🏆 Performance Benchmark Analysis</h1>
-        <h2 style="text-align: center; color: #2E86AB;">PostgreSQL vs Citus Comparative Study</h2>
+        <h2 style="text-align: center; color: #2E86AB;">PostgreSQL vs Citus vs Citus + Patroni</h2>
         
         <div class="info">
             <p><strong>📅 Generated on:</strong> {datetime.now().strftime('%B %d, %Y at %H:%M:%S')}</p>
             <p><strong>📊 Data Source:</strong> pgbench benchmarks with TPC-B, Select-Only, and Simple-Update workloads</p>
-            <p><strong>🎯 Objective:</strong> Compare performance between monolithic PostgreSQL and distributed Citus architectures</p>
+            <p><strong>🎯 Objective:</strong> Compare performance between PostgreSQL, Citus, and Citus + Patroni (HA) architectures</p>
             <p><strong>📚 Context:</strong> Graduate Thesis - Database Monitoring Guidelines</p>
         </div>
         
@@ -533,7 +604,7 @@ class BenchmarkAnalyzer:
         </div>
         <p style="text-align: center; font-style: italic; color: #666;">
             This chart displays transactions per second (TPS) for each workload and client configuration, 
-            showing the raw processing capacity of both database architectures.
+            showing the raw processing capacity of all three database architectures.
         </p>
         
         <h2>⏱️ 2. Latency Analysis</h2>
@@ -550,8 +621,9 @@ class BenchmarkAnalyzer:
             <img src="throughput_vs_latency.png" alt="TPS vs Latency Scatter Plot">
         </div>
         <p style="text-align: center; font-style: italic; color: #666;">
-            This scatter plot reveals the relationship between throughput and latency, 
-            helping identify optimal performance configurations for each architecture.
+            This scatter plot reveals the relationship between throughput and latency for each architecture. 
+            Each point represents a different client configuration (e.g., 4 clients, 16 clients), 
+            helping identify optimal performance trade-offs for each workload and architecture.
         </p>
         
         <h2>📋 4. Download Resources</h2>
@@ -564,7 +636,7 @@ class BenchmarkAnalyzer:
         
         <div class="footer">
             <p><strong>Professional Benchmark Analysis Tool</strong></p>
-            <p>Graduate Thesis Research - PostgreSQL vs Citus Performance Comparison</p>
+            <p>Graduate Thesis Research - PostgreSQL vs Citus vs Citus + Patroni Performance Comparison</p>
             <p>Automated report generation for academic research purposes</p>
         </div>
     </div>
