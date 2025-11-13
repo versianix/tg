@@ -1,37 +1,36 @@
 # ================================================================================
-# CONFIGURAÇÃO DE TABELAS E SHARDING
-# Arquivo: config/tables.yml
-# Objetivo: Definir estrutura de tabelas, tipos de sharding e relacionamentos
+# TABLES AND SHARDING CONFIGURATION
+# Objective: Define table structure, sharding types and relationships
 # ================================================================================
 
 database:
   name: "citus_platform"
-  description: "Plataforma Educacional Citus"
+  description: "Citus Educational Platform"
 
-# Definição das tabelas
+# Table definitions
 tables:
   # ===========================================
-  # TABELA DE REFERÊNCIA (não distribuída)
+  # REFERENCE TABLE (not distributed)
   # ===========================================
   companies:
-    description: "Empresas anunciantes"
+    description: "Advertising companies"
     type: "reference"  # reference, distributed, local
     columns:
       - name: "id"
         type: "SERIAL PRIMARY KEY"
-        description: "ID único da empresa"
+        description: "Company unique ID"
       - name: "name"
         type: "VARCHAR(255) NOT NULL"
-        description: "Nome da empresa"
+        description: "Company name"
       - name: "industry"
         type: "VARCHAR(100)"
-        description: "Setor da indústria"
+        description: "Industry sector"
       - name: "country"
         type: "VARCHAR(100)"
-        description: "País de origem"
+        description: "Country of origin"
       - name: "created_at"
         type: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-        description: "Data de criação"
+        description: "Creation date"
     indexes:
       - name: "idx_companies_industry"
         columns: ["industry"]
@@ -40,40 +39,40 @@ tables:
     data_file: "companies.csv"
 
   # ===========================================
-  # TABELA DISTRIBUÍDA POR COMPANY_ID
+  # TABLE DISTRIBUTED BY COMPANY_ID
   # ===========================================
   campaigns:
-    description: "Campanhas publicitárias"
+    description: "Advertising campaigns"
     type: "distributed"
-    shard_key: "company_id"  # Coluna para fazer sharding
-    shard_count: 8          # Número de shards
-    replication_factor: 1    # Fator de replicação
+    shard_key: "company_id"  # Column for sharding
+    shard_count: 8          # Number of shards
+    replication_factor: 1    # Replication factor
     columns:
       - name: "id"
         type: "SERIAL"
-        description: "ID único da campanha"
+        description: "Campaign unique ID"
       - name: "company_id"
         type: "INTEGER NOT NULL"
-        description: "ID da empresa (shard key)"
+        description: "Company ID (shard key)"
       - name: "name"
         type: "VARCHAR(255) NOT NULL"
-        description: "Nome da campanha"
+        description: "Campaign name"
       - name: "budget"
         type: "DECIMAL(12,2)"
-        description: "Orçamento da campanha"
+        description: "Campaign budget"
       - name: "status"
         type: "VARCHAR(20) DEFAULT 'active'"
-        description: "Status da campanha"
+        description: "Campaign status"
       - name: "start_date"
         type: "DATE"
-        description: "Data de início"
+        description: "Start date"
       - name: "end_date"
         type: "DATE"
-        description: "Data de fim"
+        description: "End date"
       - name: "created_at"
         type: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-        description: "Data de criação"
-    primary_key: ["id", "company_id"]  # Chave primária composta
+        description: "Creation date"
+    primary_key: ["id", "company_id"]  # Composite primary key
     foreign_keys:
       - column: "company_id"
         references: "companies(id)"
@@ -85,43 +84,43 @@ tables:
     data_file: "campaigns.csv"
 
   # ===========================================
-  # TABELA DISTRIBUÍDA POR COMPANY_ID (co-localizada)
+  # TABLE DISTRIBUTED BY COMPANY_ID (colocated)
   # ===========================================
   ads:
-    description: "Anúncios individuais"
+    description: "Individual advertisements"
     type: "distributed"
     shard_key: "company_id"
     shard_count: 8
     replication_factor: 1
-    colocated_with: "campaigns"  # Co-localização para JOINs eficientes
+    colocated_with: "campaigns"  # Colocation for efficient JOINs
     columns:
       - name: "id"
         type: "SERIAL"
-        description: "ID único do anúncio"
+        description: "Ad unique ID"
       - name: "campaign_id"
         type: "INTEGER NOT NULL"
-        description: "ID da campanha"
+        description: "Campaign ID"
       - name: "company_id"
         type: "INTEGER NOT NULL"
-        description: "ID da empresa (shard key)"
+        description: "Company ID (shard key)"
       - name: "title"
         type: "VARCHAR(255) NOT NULL"
-        description: "Título do anúncio"
+        description: "Ad title"
       - name: "content"
         type: "TEXT"
-        description: "Conteúdo do anúncio"
+        description: "Ad content"
       - name: "clicks"
         type: "INTEGER DEFAULT 0"
-        description: "Número de clicks"
+        description: "Number of clicks"
       - name: "impressions"
         type: "INTEGER DEFAULT 0"
-        description: "Número de impressões"
+        description: "Number of impressions"
       - name: "cost"
         type: "DECIMAL(10,2)"
-        description: "Custo do anúncio"
+        description: "Ad cost"
       - name: "created_at"
         type: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-        description: "Data de criação"
+        description: "Creation date"
     primary_key: ["id", "company_id"]
     foreign_keys:
       - column: "campaign_id"
@@ -136,43 +135,43 @@ tables:
     data_file: "ads.csv"
 
   # ===========================================
-  # TABELA LOCAL (apenas para demonstração)
+  # LOCAL TABLE (for demonstration only)
   # ===========================================
   system_metrics:
-    description: "Métricas do sistema (tabela local)"
+    description: "System metrics (local table)"
     type: "local"
     columns:
       - name: "id"
         type: "SERIAL PRIMARY KEY"
-        description: "ID único da métrica"
+        description: "Metric unique ID"
       - name: "metric_name"
         type: "VARCHAR(100) NOT NULL"
-        description: "Nome da métrica"
+        description: "Metric name"
       - name: "metric_value"
         type: "DECIMAL(15,2)"
-        description: "Valor da métrica"
+        description: "Metric value"
       - name: "collected_at"
         type: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-        description: "Timestamp da coleta"
+        description: "Collection timestamp"
     indexes:
       - name: "idx_metrics_name_time"
         columns: ["metric_name", "collected_at"]
     data_file: "system_metrics.csv"
 
 # ===========================================
-# CONFIGURAÇÕES DE SHARDING
+# SHARDING CONFIGURATIONS
 # ===========================================
 sharding:
   default_shard_count: 4
   default_replication_factor: 1
   colocated_tables:
-    - ["campaigns", "ads"]  # Tabelas co-localizadas para JOINs eficientes
+    - ["campaigns", "ads"]  # Colocated tables for efficient JOINs
 
 # ===========================================
-# CONFIGURAÇÕES DE PERFORMANCE
+# PERFORMANCE CONFIGURATIONS
 # ===========================================
 performance:
-  enable_columnar: false  # Habilitar extensão columnar (Citus 10+)
+  enable_columnar: false  # Enable columnar extension (Citus 10+)
   enable_compression: false
   work_mem: "256MB"
   shared_buffers: "512MB"
